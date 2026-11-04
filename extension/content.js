@@ -309,9 +309,13 @@
       else wanted.delete(el);
     });
     wanted.forEach((title) => {
+      const before = title.getBoundingClientRect().height;
       title.classList.add("ncl-heart");
-      // 제목이 말줄임(…)으로 잘리면 뒤에 붙인 하트도 잘리므로 앞에 붙임
-      if (title.scrollWidth > title.clientWidth + 1) title.classList.add("ncl-heart-front");
+      // 하트 때문에 제목이 다음 줄로 넘어가거나(줄바꿈),
+      // 말줄임(…)으로 잘려 하트가 안 보이면 제목 앞에 붙임
+      const wrapped = title.getBoundingClientRect().height > before + 8; // 한 줄 이상 늘어났을 때만
+      const clipped = title.scrollWidth > title.clientWidth + 1;
+      if (wrapped || clipped) title.classList.add("ncl-heart-front");
     });
     // 예전 버전이 끼워 넣은 하트 요소 정리
     document.querySelectorAll(".ncl-badge").forEach((b) => b.remove());
