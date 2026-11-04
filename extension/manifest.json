@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "네이버 카페 좋아요 표시",
+  "version": "1.4.2",
+  "description": "좋아요를 누른 네이버 카페 게시글을 목록에서 분홍 배경이나 하트로 표시합니다.",
+  "permissions": [
+    "storage"
+  ],
+  "action": {
+    "default_title": "좋아요 표시 방식 설정",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://cafe.naver.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "style.css"
+      ],
+      "all_frames": true,
+      "run_at": "document_start"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

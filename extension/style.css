@@ -1,0 +1,35 @@
+/* 좋아요한 글 줄 배경 */
+.ncl-liked-row,
+.ncl-liked-row > td {
+  background-color: #fff0f3 !important;
+}
+
+/* 좋아요한 글 제목 끝의 하트
+   - 카페 화면의 글꼴·줄 높이 설정을 물려받지 않도록 전부 직접 지정
+   - 줄 높이보다 작게 만들어 목록 줄 높이가 늘어나지 않게 함 */
+.ncl-heart:not(.ncl-heart-front)::after,
+.ncl-heart-front::before {
+  content: "\2665  좋아요";
+  display: inline-block;
+  box-sizing: border-box;
+  height: 16px;
+  margin: 0 0 0 6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 8px;
+  background: #ff4d6d;
+  color: #fff;
+  font: bold 11px/16px -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  letter-spacing: 0;
+  text-decoration: none;
+  text-indent: 0;
+  text-transform: none;
+  white-space: nowrap;
+  vertical-align: 1px;
+  pointer-events: none;
+}
+
+/* 말줄임 제목은 하트를 앞에 */
+.ncl-heart-front::before {
+  margin: 0 5px 0 0;
+}
