@@ -40,14 +40,9 @@
   pointer-events: none;
 }
 
-/* 하트 모양: 아이콘(♥)만 */
+/* 하트 모양: 아이콘(♥)만 — "♥ 좋아요" 배지와 같은 높이·하트 크기에서 글자만 뺌 */
 .ncl-heart-dot.ncl-icon {
-  width: 15px;
-  height: 15px;
-  margin: -7.5px 0 0 0 !important;
-  padding: 0;
-  border-radius: 50%;
-  font: bold 9px/15px Arial, sans-serif;
+  padding: 0 6px;
 }
 
 /* 배경이 칠해진 줄에서는 하트 테두리도 배경색으로 */
