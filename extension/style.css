@@ -4,36 +4,44 @@
   background-color: #fff0f3 !important;
 }
 
-/* 좋아요한 글 하트 (제목 끝, 카페의 N 아이콘처럼 작은 동그라미)
-   - 카페 화면의 글꼴·줄 높이 설정을 물려받지 않도록 전부 직접 지정
-   - 줄 높이보다 작게 만들어 목록 줄 높이가 늘어나지 않게 함 */
-.ncl-heart:not(.ncl-heart-front)::after,
-.ncl-heart-front::before {
-  content: "\2665";
-  display: inline-block;
+/* 하트를 띄울 기준점 (원래 위치 지정이 없던 줄에만 붙음) */
+.ncl-pos {
+  position: relative !important;
+}
+
+/* 좋아요한 글 하트: 줄 오른쪽 끝에 떠 있음
+   - 글자 흐름 밖이라 제목이 길어도 줄바꿈·줄 높이 변화가 없음
+   - 카페 화면의 글꼴·여백 설정을 물려받지 않도록 전부 직접 지정 */
+.ncl-heart-dot {
+  position: absolute !important;
+  top: 50% !important;
+  right: 6px !important;
+  left: auto !important;
+  bottom: auto !important;
+  z-index: 2;
+  display: block !important;
   box-sizing: border-box;
   width: 15px;
   height: 15px;
-  margin: 0 0 0 4px;
+  margin: -7.5px 0 0 0 !important;
   padding: 0;
   border: 0;
   border-radius: 50%;
   background: #ff4d6d;
+  box-shadow: 0 0 0 2px #fff;
   color: #fff;
   font: bold 9px/15px Arial, sans-serif;
   letter-spacing: 0;
   text-align: center;
   text-decoration: none;
   text-indent: 0;
-  text-transform: none;
   white-space: nowrap;
-  vertical-align: middle;
-  position: relative;
-  top: -1px;
+  float: none !important;
   pointer-events: none;
 }
 
-/* 줄이 넘어가거나 말줄임된 제목은 하트를 앞에 */
-.ncl-heart-front::before {
-  margin: 0 4px 0 0;
+/* 배경이 칠해진 줄에서는 하트 테두리도 배경색으로 */
+.ncl-liked-row .ncl-heart-dot,
+.ncl-liked-row > td .ncl-heart-dot {
+  box-shadow: 0 0 0 2px #fff0f3;
 }

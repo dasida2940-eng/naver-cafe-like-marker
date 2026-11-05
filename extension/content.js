@@ -299,26 +299,36 @@
       });
     }
 
-    // 하트 (줄마다 1개, 제목 끝)
-    // 새 요소를 끼워 넣지 않고 제목 링크에 클래스만 붙여 CSS(::after)로 그림
-    // → 카페 화면의 레이아웃(flex, 고정 너비 등)과 화면 갱신 코드를 건드리지 않음
-    const wanted = new Set();
-    if (showHeart) likedRows.forEach((title) => wanted.add(title));
-    document.querySelectorAll(".ncl-heart").forEach((el) => {
-      if (!wanted.has(el)) el.classList.remove("ncl-heart", "ncl-heart-front");
-      else wanted.delete(el);
+    // 하트 (줄마다 1개, 줄 오른쪽 끝)
+    // 글자 흐름 밖(position:absolute)에 띄워서, 제목 길이와 상관없이 줄바꿈이 생기지 않음
+    // 테이블 목록은 줄 맨 끝이 날짜 칸이라 제목 칸의 오른쪽 끝에 붙임
+    const anchors = new Set();
+    if (showHeart) {
+      likedRows.forEach((title, row) => {
+        const anchor = (row.tagName === "TR" && title.closest("td")) || row;
+        anchors.add(anchor);
+      });
+    }
+    document.querySelectorAll(".ncl-heart-dot").forEach((dot) => {
+      if (!anchors.has(dot.parentElement)) dot.remove();
+      else anchors.delete(dot.parentElement);
     });
-    wanted.forEach((title) => {
-      const before = title.getBoundingClientRect().height;
-      title.classList.add("ncl-heart");
-      // 하트 때문에 제목이 다음 줄로 넘어가거나(줄바꿈),
-      // 말줄임(…)으로 잘려 하트가 안 보이면 제목 앞에 붙임
-      const wrapped = title.getBoundingClientRect().height > before + 8; // 한 줄 이상 늘어났을 때만
-      const clipped = title.scrollWidth > title.clientWidth + 1;
-      if (wrapped || clipped) title.classList.add("ncl-heart-front");
+    document.querySelectorAll(".ncl-pos").forEach((el) => {
+      if (!el.querySelector(":scope > .ncl-heart-dot")) el.classList.remove("ncl-pos");
     });
-    // 예전 버전이 끼워 넣은 하트 요소 정리
+    anchors.forEach((anchor) => {
+      // 이미 위치 지정(relative/absolute 등)이 된 요소는 그대로 두고, 아니면 기준점으로 만듦
+      if (getComputedStyle(anchor).position === "static") anchor.classList.add("ncl-pos");
+      const dot = document.createElement("span");
+      dot.className = "ncl-heart-dot";
+      dot.textContent = "\u2665";
+      dot.setAttribute("aria-hidden", "true");
+      anchor.appendChild(dot);
+    });
+
+    // 예전 버전의 하트 정리
     document.querySelectorAll(".ncl-badge").forEach((b) => b.remove());
+    document.querySelectorAll(".ncl-heart").forEach((el) => el.classList.remove("ncl-heart", "ncl-heart-front"));
   }
 
   // 배경을 칠할 "한 줄" 찾기
