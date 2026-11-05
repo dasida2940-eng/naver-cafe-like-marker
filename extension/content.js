@@ -8,10 +8,12 @@
   const STORAGE_KEY = "likedArticles"; // { key: { c: 카페번호, n: 카페이름, a: 글번호, t: 저장시각 } }
   const MAP_KEY = "cafeMap";           // { 카페번호: 카페이름 }  (서로 모를 때 채워 넣기용)
   const MODE_KEY = "displayMode";      // "bg" | "bg_heart" | "heart"
+  const STYLE_KEY = "heartStyle";      // "text"(♥ 좋아요) | "icon"(♥)
 
   let liked = {};
   let cafeMap = {};
   let mode = "bg";
+  let heartStyle = "text";
   let index = new Map(); // 글번호 → [기록...]  (빠른 조회용)
 
   // 카페 이름으로 오인하면 안 되는 주소 첫 부분
@@ -171,9 +173,10 @@
 
   function load() {
     return new Promise((done) => {
-      chrome.storage.local.get([STORAGE_KEY, MAP_KEY, MODE_KEY], (r) => {
+      chrome.storage.local.get([STORAGE_KEY, MAP_KEY, MODE_KEY, STYLE_KEY], (r) => {
         cafeMap = r[MAP_KEY] || {};
         mode = r[MODE_KEY] || "bg";
+        heartStyle = r[STYLE_KEY] || "text";
         const { out, changed } = migrate(r[STORAGE_KEY]);
         liked = out;
         if (changed) chrome.storage.local.set({ [STORAGE_KEY]: liked });
@@ -215,6 +218,11 @@
       ctxCache = null;
     }
     if (changes[MODE_KEY]) mode = changes[MODE_KEY].newValue || "bg";
+    if (changes[STYLE_KEY]) {
+      heartStyle = changes[STYLE_KEY].newValue || "text";
+      // 모양이 바뀌면 크기도 달라지므로 하트를 지우고 다시 그림 (여백도 다시 계산됨)
+      document.querySelectorAll(".ncl-heart-dot").forEach((d) => d.remove());
+    }
     markList();
   });
 
@@ -324,8 +332,8 @@
       // 이미 위치 지정(relative/absolute 등)이 된 요소는 그대로 두고, 아니면 기준점으로 만듦
       if (getComputedStyle(anchor).position === "static") anchor.classList.add("ncl-pos");
       const dot = document.createElement("span");
-      dot.className = "ncl-heart-dot";
-      dot.textContent = "\u2665 좋아요";
+      dot.className = heartStyle === "icon" ? "ncl-heart-dot ncl-icon" : "ncl-heart-dot";
+      dot.textContent = heartStyle === "icon" ? "\u2665" : "\u2665 좋아요";
       dot.setAttribute("aria-hidden", "true");
       anchor.appendChild(dot);
       dotTitles.set(anchor, title);
