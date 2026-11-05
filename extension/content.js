@@ -321,7 +321,7 @@
       if (getComputedStyle(anchor).position === "static") anchor.classList.add("ncl-pos");
       const dot = document.createElement("span");
       dot.className = "ncl-heart-dot";
-      dot.textContent = "\u2665";
+      dot.textContent = "\u2665 좋아요";
       dot.setAttribute("aria-hidden", "true");
       anchor.appendChild(dot);
     });
