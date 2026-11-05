@@ -313,8 +313,7 @@
     const anchors = new Map(); // 하트를 붙일 곳 → 그 줄의 제목 링크
     if (showHeart) {
       likedRows.forEach((title, row) => {
-        const anchor = (row.tagName === "TR" && title.closest("td")) || row;
-        anchors.set(anchor, title);
+        anchors.set(heartAnchor(row, title), title);
       });
     }
     document.querySelectorAll(".ncl-heart-dot").forEach((dot) => {
@@ -344,6 +343,21 @@
     // 예전 버전의 하트 정리
     document.querySelectorAll(".ncl-badge").forEach((b) => b.remove());
     document.querySelectorAll(".ncl-heart").forEach((el) => el.classList.remove("ncl-heart", "ncl-heart-front"));
+  }
+
+  // 하트를 붙일 곳 찾기
+  // 제목·작성자·날짜처럼 칸이 나뉜 줄이면 줄 끝이 아니라 "제목 칸"의 오른쪽 끝에 붙임
+  // (줄 끝에 붙이면 날짜 칸과 겹치거나 화면 밖으로 잘리고, 여백 때문에 다른 칸이 밀림)
+  function heartAnchor(row, title) {
+    if (row.tagName === "TR") return title.closest("td") || row;
+    let cell = title;
+    while (cell.parentElement && cell.parentElement !== row) cell = cell.parentElement;
+    if (cell === title || cell.parentElement !== row) return row;
+    if (getComputedStyle(cell).display === "inline") return row;
+    const otherColumns = [...row.children].some(
+      (ch) => ch !== cell && !ch.classList.contains("ncl-heart-dot") && ch.textContent.trim()
+    );
+    return otherColumns ? cell : row;
   }
 
   // ---------- 긴 제목이 하트 배지에 가려지지 않게 ----------
