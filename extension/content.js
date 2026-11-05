@@ -302,21 +302,25 @@
     // 하트 (줄마다 1개, 줄 오른쪽 끝)
     // 글자 흐름 밖(position:absolute)에 띄워서, 제목 길이와 상관없이 줄바꿈이 생기지 않음
     // 테이블 목록은 줄 맨 끝이 날짜 칸이라 제목 칸의 오른쪽 끝에 붙임
-    const anchors = new Set();
+    const anchors = new Map(); // 하트를 붙일 곳 → 그 줄의 제목 링크
     if (showHeart) {
       likedRows.forEach((title, row) => {
         const anchor = (row.tagName === "TR" && title.closest("td")) || row;
-        anchors.add(anchor);
+        anchors.set(anchor, title);
       });
     }
     document.querySelectorAll(".ncl-heart-dot").forEach((dot) => {
-      if (!anchors.has(dot.parentElement)) dot.remove();
-      else anchors.delete(dot.parentElement);
+      const anchor = dot.parentElement;
+      if (!anchors.has(anchor)) dot.remove();
+      else {
+        dotTitles.set(anchor, anchors.get(anchor));
+        anchors.delete(anchor);
+      }
     });
     document.querySelectorAll(".ncl-pos").forEach((el) => {
       if (!el.querySelector(":scope > .ncl-heart-dot")) el.classList.remove("ncl-pos");
     });
-    anchors.forEach((anchor) => {
+    anchors.forEach((title, anchor) => {
       // 이미 위치 지정(relative/absolute 등)이 된 요소는 그대로 두고, 아니면 기준점으로 만듦
       if (getComputedStyle(anchor).position === "static") anchor.classList.add("ncl-pos");
       const dot = document.createElement("span");
@@ -324,12 +328,84 @@
       dot.textContent = "\u2665 좋아요";
       dot.setAttribute("aria-hidden", "true");
       anchor.appendChild(dot);
+      dotTitles.set(anchor, title);
+      fitTitle(title, dot, anchor);
     });
+    cleanupFits();
 
     // 예전 버전의 하트 정리
     document.querySelectorAll(".ncl-badge").forEach((b) => b.remove());
     document.querySelectorAll(".ncl-heart").forEach((el) => el.classList.remove("ncl-heart", "ncl-heart-front"));
   }
+
+  // ---------- 긴 제목이 하트 배지에 가려지지 않게 ----------
+  // 하트 배지가 있는 줄: 줄 → 제목 링크
+  const dotTitles = new Map();
+  // 오른쪽 여백을 준 줄 → 원래 inline padding-right 값
+  const reserved = new Map();
+
+  // 배지 자리에 글자(제목·댓글 수·아이콘)가 겹치면, 그 줄에만 배지 폭만큼 오른쪽 여백을 줌
+  // → 글자가 배지 앞에서 자연스럽게 줄바꿈되어 가려지지 않음 (겹치지 않는 줄은 그대로)
+  function fitTitle(title, dot, anchor) {
+    unreserve(anchor);
+    if (!overlaps(dot, anchor)) return;
+    const cs = getComputedStyle(anchor);
+    const pad = parseFloat(cs.paddingRight) || 0;
+    const need = dot.getBoundingClientRect().width + 10;
+    reserved.set(anchor, anchor.style.getPropertyValue("padding-right"));
+    anchor.style.setProperty("padding-right", Math.ceil(pad + need) + "px", "important");
+  }
+
+  function overlaps(dot, anchor) {
+    const d = dot.getBoundingClientRect();
+    const left = d.left - 4;
+    for (const el of anchor.querySelectorAll("*")) {
+      if (el === dot) continue;
+      for (const r of el.getClientRects()) {
+        if (r.width && r.right > left && r.left < d.right && r.bottom > d.top && r.top < d.bottom) return true;
+      }
+    }
+    // 링크로 감싸지 않은 글자도 확인
+    const range = document.createRange();
+    for (const node of anchor.childNodes) {
+      if (node.nodeType !== 3 || !node.textContent.trim()) continue;
+      range.selectNodeContents(node);
+      for (const r of range.getClientRects()) {
+        if (r.width && r.right > left && r.left < d.right && r.bottom > d.top && r.top < d.bottom) return true;
+      }
+    }
+    return false;
+  }
+
+  function unreserve(anchor) {
+    if (!reserved.has(anchor)) return;
+    const prev = reserved.get(anchor);
+    if (prev) anchor.style.setProperty("padding-right", prev);
+    else anchor.style.removeProperty("padding-right");
+    reserved.delete(anchor);
+  }
+
+  // 하트가 사라진 줄은 원래대로
+  function cleanupFits() {
+    dotTitles.forEach((title, anchor) => {
+      if (!anchor.isConnected || !anchor.querySelector(":scope > .ncl-heart-dot")) dotTitles.delete(anchor);
+    });
+    reserved.forEach((_, anchor) => {
+      if (!dotTitles.has(anchor)) unreserve(anchor);
+    });
+  }
+
+  // 창 크기가 바뀌면 다시 맞춤
+  let resizeTimer = 0;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      dotTitles.forEach((title, anchor) => {
+        const dot = anchor.querySelector(":scope > .ncl-heart-dot");
+        if (dot && anchor.isConnected) fitTitle(title, dot, anchor);
+      });
+    }, 150);
+  });
 
   // 배경을 칠할 "한 줄" 찾기
   // tr/li를 우선 쓰되, 그 안에 다른 글 링크가 섞여 있으면 여러 글을 감싼 큰 상자이므로
