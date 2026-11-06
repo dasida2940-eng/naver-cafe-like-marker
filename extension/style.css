@@ -1,7 +1,9 @@
-/* 좋아요한 글 줄 배경 */
-.ncl-liked-row,
-.ncl-liked-row > td {
-  background-color: #fff0f3 !important;
+/* 좋아요한 글 줄 배경
+   반투명이라 밝은 화면에서는 연분홍, 어두운 화면에서는 어두운 분홍으로 보여 글자가 잘 읽힘 */
+/* 테이블은 칸(td)에만 칠함 (줄과 칸에 같이 칠하면 반투명이 겹쳐 더 진해짐) */
+.ncl-liked-row:not(tr),
+tr.ncl-liked-row > td {
+  background-color: rgba(255, 77, 109, 0.1) !important;
 }
 
 /* 하트를 띄울 기준점 (원래 위치 지정이 없던 줄에만 붙음) */
@@ -9,8 +11,8 @@
   position: relative !important;
 }
 
-/* 좋아요한 글 하트: 줄 오른쪽 끝에 떠 있음
-   - 글자 흐름 밖이라 제목이 길어도 줄바꿈·줄 높이 변화가 없음
+/* 좋아요한 글 하트: 제목 칸 오른쪽 끝, 제목 높이에 떠 있음
+   - 글자 흐름 밖이라 하트 때문에 줄바꿈되지 않음 (자리는 content.js가 겹치지 않게 고름)
    - 카페 화면의 글꼴·여백 설정을 물려받지 않도록 전부 직접 지정 */
 .ncl-heart-dot {
   position: absolute !important;
@@ -28,7 +30,6 @@
   border: 0;
   border-radius: 9px;
   background: #ff4d6d;
-  box-shadow: 0 0 0 2px #fff;
   color: #fff;
   font: bold 11px/17px -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
   letter-spacing: 0;
@@ -44,10 +45,3 @@
 .ncl-heart-dot.ncl-icon {
   padding: 0 6px;
 }
-
-/* 배경이 칠해진 줄에서는 하트 테두리도 배경색으로 */
-.ncl-liked-row .ncl-heart-dot,
-.ncl-liked-row > td .ncl-heart-dot {
-  box-shadow: 0 0 0 2px #fff0f3;
-}
-

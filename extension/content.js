@@ -23,10 +23,12 @@
   // 같은 주소는 다시 계산하지 않도록 결과를 캐시
   const parseCache = new Map();
   function parseUrl(href) {
-    if (parseCache.has(href)) return parseCache.get(href);
+    // 상대 주소는 지금 페이지에 따라 뜻이 달라지므로 페이지 주소도 키에 포함
+    const key = /^https?:/i.test(href) ? href : location.href + " " + href;
+    if (parseCache.has(key)) return parseCache.get(key);
     const r = parseUrlRaw(href);
     if (parseCache.size > 5000) parseCache.clear();
-    parseCache.set(href, r);
+    parseCache.set(key, r);
     return r;
   }
 
@@ -117,8 +119,9 @@
 
   // 링크 주소 + 현재 카페 정보로 완전한 글 정보 만들기
   function resolve(href, ctx) {
-    const r = parseUrl(href);
-    if (!r || !r.a) return null;
+    const parsed = parseUrl(href);
+    if (!parsed || !parsed.a) return null;
+    const r = { ...parsed }; // 캐시된 결과를 직접 고치지 않도록 복사
     // 카페 정보가 없는 짧은 링크는 지금 보고 있는 카페의 글
     if (!r.c && !r.n) {
       r.c = ctx.c;
@@ -221,7 +224,7 @@
     if (changes[STYLE_KEY]) {
       heartStyle = changes[STYLE_KEY].newValue || "text";
       // 모양이 바뀌면 크기도 달라지므로 하트를 지우고 다시 그림 (여백도 다시 계산됨)
-      document.querySelectorAll(".ncl-heart-dot").forEach((d) => d.remove());
+      clearHearts();
     }
     markList();
   });
@@ -278,18 +281,21 @@
   // ---------- 2) 게시판 목록: 표시 ----------
   const ARTICLE_LINK_SELECTOR =
     "a.article, a[href*='articleid='], a[href*='/articles/'], a[href^='/'], a[href^='https://cafe.naver.com/']";
+  // 글 본문 영역: 본문 문장 속 링크는 목록이 아니므로 표시하지 않음
+  const ARTICLE_BODY_SELECTOR = ".article_container, .se-main-container, .ContentRenderer, .article_viewer, #tbody";
 
   function markList() {
     if (!document.body) return;
     const ctx = pageCafe();
     const current = currentArticle();
-    const likedRows = new Map(); // 줄(tr/li) → 하트를 붙일 제목 링크
+    const likedRows = new Map(); // 줄 → 그 줄의 제목 링크
 
     document.querySelectorAll(ARTICLE_LINK_SELECTOR).forEach((a) => {
       const ids = resolve(a.getAttribute("href"), ctx);
       if (!ids || !isLiked(ids)) return;
-      // 지금 보고 있는 글 본문 안의 링크는 건너뜀
-      if (current && current.a === ids.a && a.closest(".ArticleContentBox, .article_container")) return;
+      if (a.closest(ARTICLE_BODY_SELECTOR)) return;
+      // 지금 보고 있는 글 화면 안의 자기 자신 링크는 건너뜀
+      if (current && current.a === ids.a && a.closest(".ArticleContentBox")) return;
       const row = findRow(a, ctx);
       likedRows.set(row, pickTitle(likedRows.get(row), a));
     });
@@ -307,127 +313,194 @@
       });
     }
 
-    // 하트 (줄마다 1개, 줄 오른쪽 끝)
-    // 글자 흐름 밖(position:absolute)에 띄워서, 제목 길이와 상관없이 줄바꿈이 생기지 않음
-    // 테이블 목록은 줄 맨 끝이 날짜 칸이라 제목 칸의 오른쪽 끝에 붙임
-    const anchors = new Map(); // 하트를 붙일 곳 → 그 줄의 제목 링크
+    // 하트
+    placed.forEach((p, row) => {
+      const keep = showHeart && likedRows.get(row) === p.title && row.isConnected && p.dot.isConnected;
+      if (!keep) unplace(row);
+    });
     if (showHeart) {
       likedRows.forEach((title, row) => {
-        anchors.set(heartAnchor(row, title), title);
+        if (!placed.has(row)) place(row, title);
       });
     }
-    document.querySelectorAll(".ncl-heart-dot").forEach((dot) => {
-      const anchor = dot.parentElement;
-      if (!anchors.has(anchor)) dot.remove();
-      else {
-        dotTitles.set(anchor, anchors.get(anchor));
-        anchors.delete(anchor);
-      }
+    // 우리 것이 아닌 하트(예전 버전 등) 정리
+    document.querySelectorAll(".ncl-heart-dot").forEach((d) => {
+      if (![...placed.values()].some((p) => p.dot === d)) d.remove();
     });
-    document.querySelectorAll(".ncl-pos").forEach((el) => {
-      if (!el.querySelector(":scope > .ncl-heart-dot")) el.classList.remove("ncl-pos");
-    });
-    anchors.forEach((title, anchor) => {
-      // 이미 위치 지정(relative/absolute 등)이 된 요소는 그대로 두고, 아니면 기준점으로 만듦
-      if (getComputedStyle(anchor).position === "static") anchor.classList.add("ncl-pos");
-      const dot = document.createElement("span");
-      dot.className = heartStyle === "icon" ? "ncl-heart-dot ncl-icon" : "ncl-heart-dot";
-      dot.textContent = heartStyle === "icon" ? "\u2665" : "\u2665 좋아요";
-      dot.setAttribute("aria-hidden", "true");
-      anchor.appendChild(dot);
-      dotTitles.set(anchor, title);
-      fitTitle(title, dot, anchor);
-    });
-    cleanupFits();
-
-    // 예전 버전의 하트 정리
     document.querySelectorAll(".ncl-badge").forEach((b) => b.remove());
     document.querySelectorAll(".ncl-heart").forEach((el) => el.classList.remove("ncl-heart", "ncl-heart-front"));
   }
 
-  // 하트를 붙일 곳 찾기
-  // 제목·작성자·날짜처럼 칸이 나뉜 줄이면 줄 끝이 아니라 "제목 칸"의 오른쪽 끝에 붙임
-  // (줄 끝에 붙이면 날짜 칸과 겹치거나 화면 밖으로 잘리고, 여백 때문에 다른 칸이 밀림)
-  function heartAnchor(row, title) {
-    if (row.tagName === "TR") return title.closest("td") || row;
-    let cell = title;
-    while (cell.parentElement && cell.parentElement !== row) cell = cell.parentElement;
-    if (cell === title || cell.parentElement !== row) return row;
-    if (getComputedStyle(cell).display === "inline") return row;
-    const otherColumns = [...row.children].some(
-      (ch) => ch !== cell && !ch.classList.contains("ncl-heart-dot") && ch.textContent.trim()
-    );
-    return otherColumns ? cell : row;
-  }
+  // ---------- 하트 위치 정하기 ----------
+  // 줄 → { anchor: 하트를 넣은 요소, dot, title, pad: 원래 inline padding-right(여백을 줬을 때만), w: 폭 }
+  const placed = new Map();
+  const rowOfAnchor = new Map();
 
-  // ---------- 긴 제목이 하트 배지에 가려지지 않게 ----------
-  // 하트 배지가 있는 줄: 줄 → 제목 링크
-  const dotTitles = new Map();
-  // 오른쪽 여백을 준 줄 → 원래 inline padding-right 값
-  const reserved = new Map();
+  // 제목에서 바깥쪽으로 한 단계씩 넓혀 가며, 하트가 글자·아이콘·사진·다른 칸과 겹치지 않는
+  // 첫 자리에 하트를 놓음. 그런 자리가 없으면 가장 안쪽 칸에 하트 폭만큼 오른쪽 여백을 줘서
+  // 글자가 하트 앞에서 줄바꿈(또는 말줄임)되도록 함
+  function place(row, title) {
+    const dot = document.createElement("span");
+    dot.className = heartStyle === "icon" ? "ncl-heart-dot ncl-icon" : "ncl-heart-dot";
+    dot.textContent = heartStyle === "icon" ? "♥" : "♥ 좋아요";
+    dot.setAttribute("aria-hidden", "true");
 
-  // 배지 자리에 글자(제목·댓글 수·아이콘)가 겹치면, 그 줄에만 배지 폭만큼 오른쪽 여백을 줌
-  // → 글자가 배지 앞에서 자연스럽게 줄바꿈되어 가려지지 않음 (겹치지 않는 줄은 그대로)
-  function fitTitle(title, dot, anchor) {
-    unreserve(anchor);
-    if (!overlaps(dot, anchor)) return;
-    const cs = getComputedStyle(anchor);
-    const pad = parseFloat(cs.paddingRight) || 0;
-    const need = dot.getBoundingClientRect().width + 10;
-    reserved.set(anchor, anchor.style.getPropertyValue("padding-right"));
-    anchor.style.setProperty("padding-right", Math.ceil(pad + need) + "px", "important");
-  }
-
-  function overlaps(dot, anchor) {
-    const d = dot.getBoundingClientRect();
-    const left = d.left - 4;
-    for (const el of anchor.querySelectorAll("*")) {
-      if (el === dot) continue;
-      for (const r of el.getClientRects()) {
-        if (r.width && r.right > left && r.left < d.right && r.bottom > d.top && r.top < d.bottom) return true;
-      }
+    const cands = candidates(row, title);
+    let chosen = null;
+    for (const c of cands) {
+      attach(dot, c);
+      positionDot(dot, c, title);
+      if (!overlaps(dot, row)) { chosen = c; break; }
     }
-    // 링크로 감싸지 않은 글자도 확인
+    const p = { anchor: null, dot, title, pad: undefined, w: 0 };
+    if (!chosen) {
+      chosen = cands[0];
+      attach(dot, chosen);
+      // 여백은 제목이 블록이면 제목에만 (같은 칸의 작성자·날짜 줄은 그대로), 아니면 그 칸에
+      const target = isBlock(title) ? title : chosen;
+      const cs = getComputedStyle(target);
+      const pad = parseFloat(cs.paddingRight) || 0;
+      p.pad = target.style.getPropertyValue("padding-right");
+      p.padTarget = target;
+      target.style.setProperty("padding-right", Math.ceil(pad + dot.getBoundingClientRect().width + 10) + "px", "important");
+      positionDot(dot, chosen, title);
+    }
+    p.anchor = chosen;
+    p.w = chosen.getBoundingClientRect().width;
+    placed.set(row, p);
+    rowOfAnchor.set(chosen, row);
+    resizeObs.observe(chosen);
+  }
+
+  function unplace(row) {
+    const p = placed.get(row);
+    if (!p) return;
+    p.dot.remove();
+    if (p.pad !== undefined) {
+      if (p.pad) p.padTarget.style.setProperty("padding-right", p.pad);
+      else p.padTarget.style.removeProperty("padding-right");
+    }
+    if (!p.anchor.querySelector(":scope > .ncl-heart-dot")) p.anchor.classList.remove("ncl-pos");
+    resizeObs.unobserve(p.anchor);
+    rowOfAnchor.delete(p.anchor);
+    placed.delete(row);
+  }
+
+  function clearHearts() {
+    [...placed.keys()].forEach(unplace);
+  }
+
+  function replace(row) {
+    const p = placed.get(row);
+    if (!p) return;
+    const title = p.title;
+    unplace(row);
+    if (row.isConnected && title.isConnected) place(row, title);
+  }
+
+  function isBlock(el) {
+    const d = getComputedStyle(el).display;
+    return d === "block" || d === "-webkit-box" || d === "flow-root" || d === "list-item";
+  }
+
+  // 하트를 넣을 후보: 제목을 감싼 블록 요소들 (안쪽 → 바깥쪽, 줄까지)
+  // 글자 사이에 끼는 인라인 요소와, 내용 크기에 맞춰 줄어드는 inline-block은 제외
+  function candidates(row, title) {
+    const out = [];
+    const stop = row.tagName === "TR" ? title.closest("td") || row : row;
+    let el = title.parentElement;
+    while (el && out.length < 6) {
+      const d = getComputedStyle(el).display;
+      if (!d.startsWith("inline") && d !== "contents" && d !== "none") out.push(el);
+      if (el === stop) break;
+      el = el.parentElement;
+    }
+    if (!out.length) out.push(stop);
+    return out;
+  }
+
+  function attach(dot, anchor) {
+    if (dot.parentElement !== anchor) anchor.appendChild(dot);
+    if (getComputedStyle(anchor).position === "static") anchor.classList.add("ncl-pos");
+    document.querySelectorAll(".ncl-pos").forEach((el) => {
+      if (el !== anchor && !el.querySelector(":scope > .ncl-heart-dot")) el.classList.remove("ncl-pos");
+    });
+  }
+
+  // 하트의 세로 위치를 제목(눈에 보이는 부분)의 가운데에 맞춤
+  function positionDot(dot, anchor, title) {
+    const t = visibleBox(title, title.getBoundingClientRect());
+    const a = anchor.getBoundingClientRect();
+    if (!t || !a.height) return;
+    const border = parseFloat(getComputedStyle(anchor).borderTopWidth) || 0;
+    const y = (t.top + t.bottom) / 2 - a.top - border + anchor.scrollTop;
+    dot.style.setProperty("top", Math.round(y) + "px", "important");
+  }
+
+  // 화면에서 실제로 보이는 부분 (overflow:hidden 으로 잘린 부분 제외)
+  function visibleBox(el, r) {
+    let box = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    for (let p = el.parentElement; p && p !== document.documentElement; p = p.parentElement) {
+      const cs = getComputedStyle(p);
+      if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
+      const c = p.getBoundingClientRect();
+      // 말줄임(…)은 글 상자(여백 안쪽) 끝에서 잘림
+      const pr = cs.textOverflow === "ellipsis" ? parseFloat(cs.paddingRight) + parseFloat(cs.borderRightWidth) || 0 : 0;
+      if (cs.overflowX !== "visible") { box.left = Math.max(box.left, c.left); box.right = Math.min(box.right, c.right - pr); }
+      if (cs.overflowY !== "visible") { box.top = Math.max(box.top, c.top); box.bottom = Math.min(box.bottom, c.bottom); }
+      if (box.right <= box.left || box.bottom <= box.top) return null;
+    }
+    return box;
+  }
+
+  // 하트가 줄 안의 글자·아이콘·사진과 겹치는지 (잘려서 안 보이는 글자는 무시)
+  function overlaps(dot, row) {
+    const d = dot.getBoundingClientRect();
+    if (!d.width) return false;
+    const L = d.left - 4, R = d.right + 2, T = d.top, B = d.bottom;
+    const hit = (el, r) => {
+      if (!r.width || !r.height) return false;
+      if (!(r.right > L && r.left < R && r.bottom > T && r.top < B)) return false;
+      const v = visibleBox(el, r);
+      return !!v && v.right > L && v.left < R && v.bottom > T && v.top < B;
+    };
+    for (const el of row.querySelectorAll("*")) {
+      if (el === dot || dot.contains(el) || el.contains(dot)) continue;
+      // 글자 없는 상자(아이콘·사진 등)의 맨 안쪽 요소만 상자로 판단 (글자는 아래에서 글자 영역으로 판단)
+      if (el.tagName !== "IMG" && (el.firstElementChild || el.textContent.trim())) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === "hidden" || cs.opacity === "0" && el.tagName !== "IMG") continue;
+      for (const r of el.getClientRects()) if (hit(el, r)) return true;
+    }
+    // 글자 (요소 안에 섞여 있는 글자 포함)
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
     const range = document.createRange();
-    for (const node of anchor.childNodes) {
-      if (node.nodeType !== 3 || !node.textContent.trim()) continue;
-      range.selectNodeContents(node);
-      for (const r of range.getClientRects()) {
-        if (r.width && r.right > left && r.left < d.right && r.bottom > d.top && r.top < d.bottom) return true;
-      }
+    while (walker.nextNode()) {
+      const t = walker.currentNode;
+      if (!t.textContent.trim() || dot.contains(t)) continue;
+      range.selectNodeContents(t);
+      for (const r of range.getClientRects()) if (hit(t.parentElement, r)) return true;
     }
     return false;
   }
 
-  function unreserve(anchor) {
-    if (!reserved.has(anchor)) return;
-    const prev = reserved.get(anchor);
-    if (prev) anchor.style.setProperty("padding-right", prev);
-    else anchor.style.removeProperty("padding-right");
-    reserved.delete(anchor);
-  }
-
-  // 하트가 사라진 줄은 원래대로
-  function cleanupFits() {
-    dotTitles.forEach((title, anchor) => {
-      if (!anchor.isConnected || !anchor.querySelector(":scope > .ncl-heart-dot")) dotTitles.delete(anchor);
-    });
-    reserved.forEach((_, anchor) => {
-      if (!dotTitles.has(anchor)) unreserve(anchor);
-    });
-  }
-
-  // 창 크기가 바뀌면 다시 맞춤
-  let resizeTimer = 0;
-  window.addEventListener("resize", () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      dotTitles.forEach((title, anchor) => {
-        const dot = anchor.querySelector(":scope > .ncl-heart-dot");
-        if (dot && anchor.isConnected) fitTitle(title, dot, anchor);
-      });
-    }, 150);
+  // 폭이 바뀌면(창 크기, 확대, 숨겨졌던 탭이 열림, 사이드바 접힘 등) 하트 자리를 다시 계산
+  const resizeObs = new ResizeObserver((entries) => {
+    for (const e of entries) {
+      const row = rowOfAnchor.get(e.target);
+      const p = row && placed.get(row);
+      if (!p) continue;
+      const w = e.target.getBoundingClientRect().width;
+      if (Math.abs(w - p.w) > 1) replace(row);
+    }
   });
+
+  function replaceAll() {
+    [...placed.keys()].forEach(replace);
+  }
+  // 글꼴이 늦게 로딩되면 글자 폭이 달라지므로 다시 계산
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(replaceAll);
+  window.addEventListener("load", replaceAll);
 
   // 배경을 칠할 "한 줄" 찾기
   // tr/li를 우선 쓰되, 그 안에 다른 글 링크가 섞여 있으면 여러 글을 감싼 큰 상자이므로
@@ -483,6 +556,11 @@
   function onMutations(records) {
     if (rafPending) return;
     for (const rec of records) {
+      // 줄을 재사용하면서 링크 주소만 바꾸는 화면(페이지 이동 등)
+      if (rec.type === "attributes") {
+        scheduleMark();
+        return;
+      }
       for (const n of rec.addedNodes) {
         if (hasLink(n)) {
           scheduleMark();
@@ -502,10 +580,12 @@
         scheduleMark();
       }
     }, 500);
-    // 속성 변화는 감시하지 않고, 노드 추가만 감시
+    // 노드 추가와 링크 주소(href) 변경만 감시
     new MutationObserver(onMutations).observe(document.documentElement, {
       childList: true,
-      subtree: true
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["href"]
     });
   });
 })();
