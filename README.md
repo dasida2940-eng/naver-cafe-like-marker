@@ -40,7 +40,7 @@ F12 → 요소 선택으로 버튼과 링크의 class를 확인해 추가하세�
 ## 폴더 구조
 ```
 extension/      확장 프로그램 본체 (스토어에 올릴 때 이 폴더 안의 파일을 zip으로 묶음)
-tests/          자동 테스트 (화면 구조 10종 × 환경 5종 × 설정 5종, 동작 시나리오)
+tests/          자동 테스트 (화면 구조 12종 × 환경 5종 × 설정 5종, 동작 시나리오)
 store-assets/   Chrome 웹 스토어용 스크린샷·프로모션 이미지
 docs/           개인정보처리방침 (GitHub Pages)
 tools/          아이콘·스토어 이미지 생성 스크립트
@@ -62,7 +62,7 @@ python3 shoot.py          # store-assets/ 스크린샷·프로모션 이미지 �
 ## 테스트
 Python Playwright가 필요합니다.
 ```bash
-python3 tests/harness.py extension     # 화면 구조 × 환경 × 설정 255개 조합 (겹침·잘림·칸 밀림·사진 크기 등)
+python3 tests/harness.py extension     # 화면 구조 × 환경 × 설정 305개 조합 (겹침·잘림·칸 밀림·사진 크기 등)
 python3 tests/scenarios.py extension   # 좋아요/취소, 설정 변경, 페이지 이동, 성능
 ```
 `tests/out/` 에 실패한 조합의 스크린샷이 저장됩니다 (`--shots` 를 붙이면 전부 저장).

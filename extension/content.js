@@ -379,6 +379,25 @@
   }
 
   // ---------- 하트 위치 정하기 ----------
+  // 카드 전체가 링크 하나인 목록(썸네일 목록, 앨범형)은 링크 안에서 실제 제목 글자 부분을 찾음
+  const TITLE_HINT = "[class*='title' i], [class*='tit' i], [class*='subject' i], [class*='headline' i], strong, b, h1, h2, h3, h4, h5, h6";
+  function titleTextOf(link) {
+    const big =
+      link.querySelector("img, picture, video, svg, canvas") ||
+      [...link.querySelectorAll("*")].filter((e) => isBlock(e) && e.textContent.trim()).length >= 2;
+    if (!big) return link;
+    for (const el of link.querySelectorAll(TITLE_HINT)) {
+      if (el.querySelector("img, picture, video")) continue;
+      const text = el.textContent.trim();
+      if (text.length >= 2 && el.getClientRects().length) return el;
+    }
+    // 힌트가 없으면 글자가 있는 첫 블록
+    for (const el of link.querySelectorAll("*")) {
+      if (isBlock(el) && !el.firstElementChild && el.textContent.trim().length >= 2) return el;
+    }
+    return link;
+  }
+
   // 줄 → { anchor: 하트를 넣은 요소, dot, title, pad: 원래 inline padding-right(여백을 줬을 때만), w: 폭 }
   const placed = new Map();
   const rowOfAnchor = new Map();
@@ -386,7 +405,8 @@
   // 제목에서 바깥쪽으로 한 단계씩 넓혀 가며, 하트가 글자·아이콘·사진·다른 칸과 겹치지 않는
   // 첫 자리에 하트를 놓음. 그런 자리가 없으면 가장 안쪽 칸에 하트 폭만큼 오른쪽 여백을 줘서
   // 글자가 하트 앞에서 줄바꿈(또는 말줄임)되도록 함
-  function place(row, title) {
+  function place(row, link) {
+    const title = titleTextOf(link);
     const dot = document.createElement("span");
     dot.className = heartStyle === "icon" ? "ncl-heart-dot ncl-icon" : "ncl-heart-dot";
     dot.textContent = heartStyle === "icon" ? "♥" : "♥ 좋아요";
@@ -397,14 +417,17 @@
     for (const c of cands) {
       attach(dot, c);
       positionDot(dot, c, title);
-      if (!overlaps(dot, row)) { chosen = c; break; }
+      if (!overlaps(dot, row) && !separated(title, dot, row)) { chosen = c; break; }
     }
-    const p = { anchor: null, dot, title, pad: undefined, w: 0 };
+    const p = { anchor: null, dot, title: link, pad: undefined, w: 0 };
     if (!chosen) {
       chosen = cands[0];
       attach(dot, chosen);
-      // 여백은 제목이 블록이면 제목에만 (같은 칸의 작성자·날짜 줄은 그대로), 아니면 그 칸에
-      const target = isBlock(title) ? title : chosen;
+      // 여백은 제목이 혼자 한 줄을 차지하는 블록이면 제목에만 (같은 칸의 작성자·날짜 줄은 그대로),
+      // 제목 뒤에 N 아이콘 등이 나란히 붙는 가로 정렬(flex/grid) 줄이면 그 줄 전체에, 아니면 그 칸에
+      const parentDisplay = title.parentElement ? getComputedStyle(title.parentElement).display : "";
+      const inFlexRow = /flex|grid/.test(parentDisplay);
+      const target = inFlexRow ? title.parentElement : isBlock(title) ? title : chosen;
       const cs = getComputedStyle(target);
       const pad = parseFloat(cs.paddingRight) || 0;
       p.pad = target.style.getPropertyValue("padding-right");
@@ -500,6 +523,21 @@
     return box;
   }
 
+  // 제목과 하트 사이에 사진·썸네일 같은 다른 덩어리가 끼어 있는지 (끼어 있으면 하트가 제목과 동떨어져 보임)
+  function separated(title, dot, row) {
+    const d = dot.getBoundingClientRect();
+    const t = visibleBox(title, title.getBoundingClientRect());
+    if (!t || !d.width || d.left - t.right < 24) return false;
+    const L = t.right, R = d.left, T = d.top, B = d.bottom;
+    for (const el of row.querySelectorAll("img, picture, video, svg, canvas, [class*='thumb' i], [class*='img' i]")) {
+      if (title.contains(el) || el.contains(title) || el === dot) continue;
+      for (const r of el.getClientRects()) {
+        if (r.width > 20 && r.height > 20 && r.right > L && r.left < R && r.bottom > T && r.top < B) return true;
+      }
+    }
+    return false;
+  }
+
   // 하트가 줄 안의 글자·아이콘·사진과 겹치는지 (잘려서 안 보이는 글자는 무시)
   function overlaps(dot, row) {
     const d = dot.getBoundingClientRect();
@@ -519,6 +557,14 @@
       if (cs.visibility === "hidden" || cs.opacity === "0" && el.tagName !== "IMG") continue;
       for (const r of el.getClientRects()) if (hit(el, r)) return true;
     }
+    // CSS 장식(::before/::after)으로 그린 아이콘 (새 글 N 표시 등)
+    for (const el of row.querySelectorAll("*")) {
+      if (el === dot || dot.contains(el)) continue;
+      for (const ps of ["::before", "::after"]) {
+        const r = pseudoRect(el, ps, d);
+        if (r && hit(el, r)) return true;
+      }
+    }
     // 글자 (요소 안에 섞여 있는 글자 포함)
     const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
     const range = document.createRange();
@@ -526,9 +572,46 @@
       const t = walker.currentNode;
       if (!t.textContent.trim() || dot.contains(t)) continue;
       range.selectNodeContents(t);
-      for (const r of range.getClientRects()) if (hit(t.parentElement, r)) return true;
+      for (const r of range.getClientRects()) if (hit(t, r)) return true; // 글자를 감싼 상자의 잘림까지 반영
     }
     return false;
+  }
+
+  // CSS 장식(::before/::after) 아이콘의 대략적인 위치 (skip: 계산에서 뺄 우리 하트 위치)
+  function pseudoRect(el, ps, skip) {
+    const cs = getComputedStyle(el, ps);
+    if (cs.content === "none" || cs.content === "normal" || cs.display === "none") return null;
+    const w = parseFloat(cs.width) || 0, h = parseFloat(cs.height) || 0;
+    if (!w || !h) return null;
+    // 내용(글자·요소)의 첫/마지막 위치 바로 앞/뒤에 그려짐
+    // 바로 아래 요소·글자의 상자 기준 (안쪽에서 말줄임으로 잘린 글자는 보지 않음)
+    const rs = [];
+    for (const n of el.childNodes) {
+      if (n.nodeType === 1) {
+        if (n.classList.contains("ncl-heart-dot") || n.classList.contains("ncl-nav-heart")) continue;
+        const cs2 = getComputedStyle(n);
+        if (cs2.position === "absolute" || cs2.position === "fixed" || cs2.display === "none") continue;
+        rs.push(...n.getClientRects());
+      } else if (n.nodeType === 3 && n.textContent.trim()) {
+        const range = document.createRange();
+        range.selectNodeContents(n);
+        rs.push(...range.getClientRects());
+      }
+    }
+    const box = el.getBoundingClientRect();
+    const own = getComputedStyle(el);
+    const gap = /flex|grid/.test(own.display) ? parseFloat(own.columnGap) || 0 : 0;
+    let left, cy;
+    if (ps === "::after") {
+      const last = rs.length ? rs.reduce((a, b) => (b.bottom > a.bottom + 1 || (Math.abs(b.bottom - a.bottom) <= 1 && b.right > a.right) ? b : a)) : null;
+      left = (last ? last.right + gap : box.left) + (parseFloat(cs.marginLeft) || 0);
+      cy = last ? (last.top + last.bottom) / 2 : (box.top + box.bottom) / 2;
+    } else {
+      const first = rs[0];
+      left = (first ? first.left - gap : box.left) - w - (parseFloat(cs.marginRight) || 0);
+      cy = first ? (first.top + first.bottom) / 2 : (box.top + box.bottom) / 2;
+    }
+    return { left, right: left + w, top: cy - h / 2, bottom: cy + h / 2, width: w, height: h };
   }
 
   // 폭이 바뀌면(창 크기, 확대, 숨겨졌던 탭이 열림, 사이드바 접힘 등) 하트 자리를 다시 계산

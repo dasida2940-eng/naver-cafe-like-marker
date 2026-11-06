@@ -81,8 +81,8 @@ CHECK = """
     if (!d.width) { errs.push(['하트 크기 0', label(dot)]); return; }
     const row = dot.closest('[data-expect]') || dot.parentElement;
     const clip = (el, r) => { let b = {left:r.left,right:r.right,top:r.top,bottom:r.bottom};
-      for (let p = el; p && p !== document.documentElement; p = p.parentElement) { const cs = getComputedStyle(p);
-        if (p !== el && (cs.overflowX !== 'visible' || cs.overflowY !== 'visible')) { const c = p.getBoundingClientRect();
+      for (let p = el.parentElement; p && p !== document.documentElement; p = p.parentElement) { const cs = getComputedStyle(p);
+        if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') { const c = p.getBoundingClientRect();
           const pr = cs.textOverflow === 'ellipsis' ? (parseFloat(cs.paddingRight) + parseFloat(cs.borderRightWidth)) || 0 : 0;
           if (cs.overflowX !== 'visible') { b.left = Math.max(b.left, c.left); b.right = Math.min(b.right, c.right - pr); }
           if (cs.overflowY !== 'visible') { b.top = Math.max(b.top, c.top); b.bottom = Math.min(b.bottom, c.bottom); } } }
@@ -97,13 +97,53 @@ CHECK = """
       curEl = el;
       if (leaf) for (const r of el.getClientRects()) if (hit(r)) { covered = el.textContent.trim().slice(0, 10) || el.className || el.tagName; }
     });
+    // CSS 장식(::before/::after)으로 그린 아이콘
+    function pseudoRect(el, ps, skip) {
+      const cs = getComputedStyle(el, ps);
+      if (cs.content === "none" || cs.content === "normal" || cs.display === "none") return null;
+      const w = parseFloat(cs.width) || 0, h = parseFloat(cs.height) || 0;
+      if (!w || !h) return null;
+      // 내용(글자·요소)의 첫/마지막 위치 바로 앞/뒤에 그려짐
+      // 바로 아래 요소·글자의 상자 기준 (안쪽에서 말줄임으로 잘린 글자는 보지 않음)
+      const rs = [];
+      for (const n of el.childNodes) {
+        if (n.nodeType === 1) {
+          if (n.classList.contains("ncl-heart-dot") || n.classList.contains("ncl-nav-heart")) continue;
+          const cs2 = getComputedStyle(n);
+          if (cs2.position === "absolute" || cs2.position === "fixed" || cs2.display === "none") continue;
+          rs.push(...n.getClientRects());
+        } else if (n.nodeType === 3 && n.textContent.trim()) {
+          const range = document.createRange();
+          range.selectNodeContents(n);
+          rs.push(...range.getClientRects());
+        }
+      }
+      const box = el.getBoundingClientRect();
+      const own = getComputedStyle(el);
+      const gap = /flex|grid/.test(own.display) ? parseFloat(own.columnGap) || 0 : 0;
+      let left, cy;
+      if (ps === "::after") {
+        const last = rs.length ? rs.reduce((a, b) => (b.bottom > a.bottom + 1 || (Math.abs(b.bottom - a.bottom) <= 1 && b.right > a.right) ? b : a)) : null;
+        left = (last ? last.right + gap : box.left) + (parseFloat(cs.marginLeft) || 0);
+        cy = last ? (last.top + last.bottom) / 2 : (box.top + box.bottom) / 2;
+      } else {
+        const first = rs[0];
+        left = (first ? first.left - gap : box.left) - w - (parseFloat(cs.marginRight) || 0);
+        cy = first ? (first.top + first.bottom) / 2 : (box.top + box.bottom) / 2;
+      }
+      return { left, right: left + w, top: cy - h / 2, bottom: cy + h / 2, width: w, height: h };
+    }
+    if (!covered) row.querySelectorAll('*').forEach(el => {
+      if (covered || el === dot || dot.contains(el)) return;
+      for (const ps of ['::before', '::after']) { const r = pseudoRect(el, ps, d); curEl = el; if (r && hit(r)) covered = 'CSS 아이콘(' + (el.className || el.tagName) + ps + ')'; }
+    });
     const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
     const range = document.createRange();
     while (!covered && walker.nextNode()) {
       const t = walker.currentNode;
       if (!t.textContent.trim() || dot.contains(t)) continue;
       range.selectNodeContents(t);
-      curEl = t.parentElement;
+      curEl = t;
       for (const r of range.getClientRects()) if (hit(r)) { covered = t.textContent.trim().slice(0, 10); break; }
     }
     if (covered) errs.push(['가림', label(dot) + ' ← ' + covered]);
@@ -118,6 +158,14 @@ CHECK = """
       }
       p = p.parentElement;
     }
+    // 세로 위치: 제목(data-title 또는 .title/.tit) 높이에 맞는지
+    const tEl = row.querySelector('[data-title], .title, .tit');
+    if (tEl) { const tb = tEl.getBoundingClientRect(), cy = (d.top + d.bottom) / 2;
+      if (cy < tb.top - 2 || cy > tb.bottom + 2) errs.push(['제목 높이 아님', label(dot)]); }
+    // 제목과 하트 사이에 사진·썸네일이 끼면 안 됨
+    if (tEl) { const tb = tEl.getBoundingClientRect();
+      for (const el of row.querySelectorAll('img, [class*=thumb], [class*=img]')) { if (el.contains(tEl)) continue; const r = el.getBoundingClientRect();
+        if (r.width > 20 && r.left >= tb.right - 1 && r.right <= d.left + 1 && r.bottom > d.top && r.top < d.bottom) { errs.push(['제목과 하트 사이에 사진', label(dot)]); break; } } }
     // 세로 위치: 줄 밖으로 나가지 않음
     const rb = row.getBoundingClientRect();
     if (d.top < rb.top - 1 || d.bottom > rb.bottom + 1) errs.push(['줄 밖', label(dot)]);
