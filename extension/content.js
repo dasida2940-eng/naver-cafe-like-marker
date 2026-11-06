@@ -419,10 +419,14 @@
     let chosen = null;
 
     // 1) 제목 줄: 안쪽 칸부터 바깥쪽으로, 겹치지 않는 첫 자리
+    //    사진·아이콘처럼 움직이지 않는 것과 겹치면 그 바로 왼쪽으로 옮겨서 다시 확인 (글자와 겹치면 다음 칸)
     for (const c of cands) {
       attach(dot, c);
+      dot.style.removeProperty("right");
       positionDot(dot, c, titleY);
       if (ok()) { chosen = c; break; }
+      if (shiftLeftOfBoxes(dot, c, row) && ok()) { chosen = c; break; }
+      dot.style.removeProperty("right");
     }
 
     // 2) 제목 줄에 여백을 줘서 글자를 비키게 함 (실제로 비켰는지 확인, 안 비키면 되돌림)
@@ -438,15 +442,19 @@
       }
     }
 
-    // 3) 제목 줄에 자리가 없으면 같은 칸 아래쪽 줄(작성자·날짜 줄 등)의 오른쪽 빈자리
+    // 3) 제목 줄에 자리가 없으면 같은 칸 아래쪽 줄(작성자·날짜 줄 등)의 오른쪽 빈자리 (줄 안쪽만)
     if (!chosen) {
+      const rb = row.getBoundingClientRect();
       for (const y of otherLines(row, title)) {
+        if (y - 9 < rb.top || y + 9 > rb.bottom) continue;
         for (const c of cands) {
           const r = c.getBoundingClientRect();
           if (y < r.top || y > r.bottom) continue;
           attach(dot, c);
+          dot.style.removeProperty("right");
           positionDot(dot, c, y);
-          if (ok()) { chosen = c; break; }
+          if (ok() || (shiftLeftOfBoxes(dot, c, row) && ok())) { chosen = c; break; }
+          dot.style.removeProperty("right");
         }
         if (chosen) break;
       }
@@ -611,6 +619,23 @@
     return box;
   }
 
+  // 하트가 사진·아이콘(글자가 아닌 것)과 겹치면 그 바로 왼쪽으로 옮김. 옮겼으면 true
+  function shiftLeftOfBoxes(dot, anchor, row) {
+    let moved = false;
+    for (let i = 0; i < 3; i++) {
+      const ob = findOverlap(dot, row);
+      if (!ob || ob.text) break;
+      const a = anchor.getBoundingClientRect();
+      const edge = a.right - (parseFloat(getComputedStyle(anchor).borderRightWidth) || 0);
+      const cur = parseFloat(dot.style.getPropertyValue("right")) || 6;
+      const next = Math.ceil(edge - ob.left + 4);
+      if (next <= cur || next > a.width - dot.getBoundingClientRect().width) break;
+      dot.style.setProperty("right", next + "px", "important");
+      moved = true;
+    }
+    return moved;
+  }
+
   // 제목과 하트 사이에 사진·썸네일 같은 다른 덩어리가 끼어 있는지 (끼어 있으면 하트가 제목과 동떨어져 보임)
   function separated(title, dot, row) {
     const d = dot.getBoundingClientRect();
@@ -653,7 +678,7 @@
       // 화면에서 거의 안 보이는(숨김 처리된 설명 글자 등) 것은 무시
       if (!v || v.right - v.left < 2 || v.bottom - v.top < 2) return false;
       if (v.right > L && v.left < R && v.bottom > T && v.top < B) {
-        found = { left: v.left, right: v.right, top: v.top, bottom: v.bottom, el: el.nodeType === 1 ? el : el.parentElement };
+        found = { left: v.left, right: v.right, top: v.top, bottom: v.bottom, text: el.nodeType === 3, el: el.nodeType === 1 ? el : el.parentElement };
         return true;
       }
       return false;
@@ -766,12 +791,23 @@
     return true;
   }
 
-  // 같은 줄의 링크 중 제목 링크를 고름 (a.article 우선, 없으면 글자가 가장 긴 링크)
+  // 같은 줄의 링크 중 제목 링크를 고름
+  // a.article > 제목다운 이름(title·tit·subject)이나 굵은 글씨 > 미리보기·요약이 아닌 것 > 글자 수(최대 60자까지만 반영)
+  const DESC_RE = /desc|preview|summary|content|cont_|txt_area|excerpt|snippet/i;
+  function titleScore(el) {
+    let score = 0;
+    if (el.classList.contains("article")) score += 10000;
+    if (/title|tit|subject|headline/i.test(el.className) || el.querySelector("strong, b, h1, h2, h3, h4, [class*='title' i], [class*='tit' i], [class*='subject' i]")) score += 3000;
+    if (DESC_RE.test(el.className)) score -= 3000;
+    const cs = getComputedStyle(el.querySelector("strong, b, [class*='tit' i]") || el);
+    if ((parseInt(cs.fontWeight, 10) || 400) >= 600) score += 500;
+    score += Math.min(parseFloat(cs.fontSize) || 0, 40) * 10;
+    score += Math.min(el.textContent.trim().length, 60);
+    return score;
+  }
   function pickTitle(prev, a) {
     if (!prev) return a;
-    const score = (el) =>
-      (el.classList.contains("article") ? 10000 : 0) + el.textContent.trim().length;
-    return score(a) > score(prev) ? a : prev;
+    return titleScore(a) > titleScore(prev) ? a : prev;
   }
 
   // ---------- 페이지 변화 감시 ----------
