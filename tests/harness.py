@@ -88,12 +88,14 @@ CHECK = """
           if (cs.overflowY !== 'visible') { b.top = Math.max(b.top, c.top); b.bottom = Math.min(b.bottom, c.bottom); } } }
       return b; };
     let curEl = null;
-    const hit = (r0) => { const r = clip(curEl, r0); return r.right - r.left > 0 && r.bottom - r.top > 0 && Math.min(r.right, d.right) - Math.max(r.left, d.left) > 1 && Math.min(r.bottom, d.bottom) - Math.max(r.top, d.top) > 1; };
+    const hit = (r0) => { const r = clip(curEl, r0); return r.right - r.left > 2 && r.bottom - r.top > 2 && Math.min(r.right, d.right) - Math.max(r.left, d.left) > 1 && Math.min(r.bottom, d.bottom) - Math.max(r.top, d.top) > 1; };
     let covered = null;
     row.querySelectorAll('*').forEach(el => {
       if (covered || el === dot || dot.contains(el) || el.contains(dot)) return;
       // 그림/아이콘(글자 없는 상자)과 글자
-      const leaf = el.tagName === 'IMG' || (!el.firstElementChild && !el.textContent.trim());
+      const ecs = getComputedStyle(el), eb = el.getBoundingClientRect();
+      const painted = ecs.backgroundImage !== 'none' || !(ecs.backgroundColor === 'transparent' || ecs.backgroundColor.endsWith(', 0)'));
+      const leaf = el.tagName === 'IMG' || (!el.firstElementChild && !el.textContent.trim()) || (painted && eb.width <= 48 && eb.height <= 48);
       curEl = el;
       if (leaf) for (const r of el.getClientRects()) if (hit(r)) { covered = el.textContent.trim().slice(0, 10) || el.className || el.tagName; }
     });

@@ -432,8 +432,25 @@
       const pad = parseFloat(cs.paddingRight) || 0;
       p.pad = target.style.getPropertyValue("padding-right");
       p.padTarget = target;
-      target.style.setProperty("padding-right", Math.ceil(pad + dot.getBoundingClientRect().width + 10) + "px", "important");
-      positionDot(dot, chosen, title);
+      const dotW = dot.getBoundingClientRect().width;
+      let offset = 6; // 하트의 오른쪽 거리
+      const apply = () => {
+        dot.style.setProperty("right", offset + "px", "important");
+        target.style.setProperty("padding-right", Math.ceil(pad + offset + dotW + 4) + "px", "important");
+        positionDot(dot, chosen, title);
+      };
+      apply();
+      // 여백을 줘도 비키지 않는 것(오른쪽 끝에 고정된 새 글 아이콘 등)과 겹치면 하트를 그 왼쪽으로 옮김
+      for (let i = 0; i < 3; i++) {
+        const ob = findOverlap(dot, row);
+        if (!ob) break;
+        const a = chosen.getBoundingClientRect();
+        const edge = a.right - (parseFloat(getComputedStyle(chosen).borderRightWidth) || 0);
+        const next = Math.ceil(edge - ob.left + 4);
+        if (next <= offset || next > a.width - dotW) break;
+        offset = next;
+        apply();
+      }
     }
     p.anchor = chosen;
     p.w = chosen.getBoundingClientRect().width;
@@ -540,29 +557,50 @@
 
   // 하트가 줄 안의 글자·아이콘·사진과 겹치는지 (잘려서 안 보이는 글자는 무시)
   function overlaps(dot, row) {
+    return !!findOverlap(dot, row);
+  }
+
+  // 배경색·그림이 칠해진 작은 상자 = 아이콘 (안에 화면에 안 보이는 설명 글자가 있어도)
+  function isPaintedIcon(el) {
+    const cs = getComputedStyle(el);
+    const painted = cs.backgroundImage !== "none" || !(cs.backgroundColor === "transparent" || cs.backgroundColor.endsWith(", 0)"));
+    if (!painted) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && r.width <= 48 && r.height <= 48;
+  }
+
+  // 하트와 겹치는 것(글자·아이콘·사진)의 화면 위치, 없으면 null
+  function findOverlap(dot, row) {
     const d = dot.getBoundingClientRect();
-    if (!d.width) return false;
+    if (!d.width) return null;
     const L = d.left - 4, R = d.right + 2, T = d.top, B = d.bottom;
+    let found = null;
     const hit = (el, r) => {
       if (!r.width || !r.height) return false;
       if (!(r.right > L && r.left < R && r.bottom > T && r.top < B)) return false;
       const v = visibleBox(el, r);
-      return !!v && v.right > L && v.left < R && v.bottom > T && v.top < B;
+      // 화면에서 거의 안 보이는(숨김 처리된 설명 글자 등) 것은 무시
+      if (!v || v.right - v.left < 2 || v.bottom - v.top < 2) return false;
+      if (v.right > L && v.left < R && v.bottom > T && v.top < B) {
+        found = { left: v.left, right: v.right, top: v.top, bottom: v.bottom, el: el.nodeType === 1 ? el : el.parentElement };
+        return true;
+      }
+      return false;
     };
     for (const el of row.querySelectorAll("*")) {
       if (el === dot || dot.contains(el) || el.contains(dot)) continue;
-      // 글자 없는 상자(아이콘·사진 등)의 맨 안쪽 요소만 상자로 판단 (글자는 아래에서 글자 영역으로 판단)
-      if (el.tagName !== "IMG" && (el.firstElementChild || el.textContent.trim())) continue;
+      // 상자로 판단: 이미지, 글자 없는 맨 안쪽 요소, 칠해진 작은 아이콘 (글자는 아래에서 글자 영역으로 판단)
+      if (el.tagName !== "IMG" && (el.firstElementChild || el.textContent.trim()) && !isPaintedIcon(el)) continue;
       const cs = getComputedStyle(el);
       if (cs.visibility === "hidden" || cs.opacity === "0" && el.tagName !== "IMG") continue;
-      for (const r of el.getClientRects()) if (hit(el, r)) return true;
+      for (const r of el.getClientRects()) if (hit(el, r)) return found;
     }
     // CSS 장식(::before/::after)으로 그린 아이콘 (새 글 N 표시 등)
     for (const el of row.querySelectorAll("*")) {
       if (el === dot || dot.contains(el)) continue;
       for (const ps of ["::before", "::after"]) {
         const r = pseudoRect(el, ps, d);
-        if (r && hit(el, r)) return true;
+        if (r && hit(el, r)) return found;
       }
     }
     // 글자 (요소 안에 섞여 있는 글자 포함)
@@ -572,9 +610,9 @@
       const t = walker.currentNode;
       if (!t.textContent.trim() || dot.contains(t)) continue;
       range.selectNodeContents(t);
-      for (const r of range.getClientRects()) if (hit(t, r)) return true; // 글자를 감싼 상자의 잘림까지 반영
+      for (const r of range.getClientRects()) if (hit(t, r)) return found; // 글자를 감싼 상자의 잘림까지 반영
     }
-    return false;
+    return null;
   }
 
   // CSS 장식(::before/::after) 아이콘의 대략적인 위치 (skip: 계산에서 뺄 우리 하트 위치)
