@@ -281,11 +281,33 @@
   // ---------- 2) 게시판 목록: 표시 ----------
   const ARTICLE_LINK_SELECTOR =
     "a.article, a[href*='articleid='], a[href*='/articles/'], a[href^='/'], a[href^='https://cafe.naver.com/']";
-  // 글 본문 영역: 본문 문장 속 링크는 목록이 아니므로 표시하지 않음
-  const ARTICLE_BODY_SELECTOR = ".article_container, .se-main-container, .ContentRenderer, .article_viewer, #tbody";
+  // 글 본문·글쓰기 에디터·댓글 본문: 문장 속 링크는 목록이 아니므로 표시하지 않음
+  const ARTICLE_BODY_SELECTOR = [
+    ".article_container", ".ContentRenderer", ".article_viewer", "#tbody", "#postViewArea",
+    ".se-main-container", ".se-viewer", ".se-content", ".se_component_wrap", ".se-component", // 스마트에디터
+    "[contenteditable='']", "[contenteditable='true']", "textarea",                          // 글쓰기 중인 영역
+    ".comment_text_view", ".comment_text_box", ".text_comment"                                // 댓글 본문
+  ].join(",");
+
+  // 글 화면의 이동 버튼(이전글·다음글·목록 등): 글 제목이 아니므로 표시하지 않음
+  const NAV_AREA_SELECTOR =
+    ".ArticleTopBtns, .ArticleBottomBtns, .article_btn, .btn_area, .prev-next, [class*='BaseButton'], [role='button']";
+  const NAV_TEXT = /^(이전\s?글|다음\s?글|윗\s?글|아랫\s?글|목록|이전|다음|맨\s?위로|top)$/i;
+  function isNavButton(a) {
+    if (a.closest(NAV_AREA_SELECTOR)) return true;
+    // 우리가 넣은 하트 글자는 빼고 판단
+    const text = [...a.childNodes]
+      .filter((n) => !(n.classList && n.classList.contains("ncl-nav-heart")))
+      .map((n) => n.textContent)
+      .join("")
+      .replace(/\s+/g, " ")
+      .trim();
+    return NAV_TEXT.test(text);
+  }
 
   function markList() {
-    if (!document.body) return;
+    if (!document.body || document.designMode === "on") return;
+    const navLinks = new Set();
     const ctx = pageCafe();
     const current = currentArticle();
     const likedRows = new Map(); // 줄 → 그 줄의 제목 링크
@@ -294,6 +316,11 @@
       const ids = resolve(a.getAttribute("href"), ctx);
       if (!ids || !isLiked(ids)) return;
       if (a.closest(ARTICLE_BODY_SELECTOR)) return;
+      // 이전글·다음글 버튼은 줄을 칠하지 않고 버튼 안에 하트만 넣음
+      if (isNavButton(a)) {
+        navLinks.add(a);
+        return;
+      }
       // 지금 보고 있는 글 화면 안의 자기 자신 링크는 건너뜀
       if (current && current.a === ids.a && a.closest(".ArticleContentBox")) return;
       const row = findRow(a, ctx);
@@ -323,6 +350,21 @@
         if (!placed.has(row)) place(row, title);
       });
     }
+    // 이전글·다음글 버튼 안의 하트
+    document.querySelectorAll(".ncl-nav-heart").forEach((h) => {
+      if (!navLinks.has(h.parentElement) || h.dataset.style !== heartStyle) h.remove();
+      else navLinks.delete(h.parentElement);
+    });
+    navLinks.forEach((a) => {
+      const h = document.createElement("span");
+      h.className = heartStyle === "icon" ? "ncl-nav-heart ncl-icon" : "ncl-nav-heart";
+      h.dataset.style = heartStyle;
+      h.textContent = heartStyle === "icon" ? "\u2665" : "\u2665 좋아요";
+      h.setAttribute("aria-hidden", "true");
+      // 버튼 안쪽 글자 묶음(span 등)이 있으면 그 뒤, 없으면 버튼 끝에
+      a.appendChild(h);
+    });
+
     // 우리 것이 아닌 하트(예전 버전 등) 정리
     document.querySelectorAll(".ncl-heart-dot").forEach((d) => {
       if (![...placed.values()].some((p) => p.dot === d)) d.remove();

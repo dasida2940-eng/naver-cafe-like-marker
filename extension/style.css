@@ -45,3 +45,24 @@ tr.ncl-liked-row > td {
 .ncl-heart-dot.ncl-icon {
   padding: 0 6px;
 }
+
+/* 이전글·다음글 버튼 안의 하트 (버튼 글자 옆에 나란히) */
+.ncl-nav-heart {
+  display: inline-block !important;
+  position: static !important;
+  height: 17px;
+  margin: 0 0 0 5px !important;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: #ff4d6d;
+  color: #fff !important;
+  font: bold 11px/17px -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  letter-spacing: 0;
+  text-decoration: none !important;
+  white-space: nowrap;
+  vertical-align: middle;
+  pointer-events: none;
+}
+.ncl-nav-heart.ncl-icon {
+  padding: 0 6px;
+}
