@@ -18,7 +18,7 @@
 ## 설치
 
 ### Chrome 웹 스토어
-심사가 끝나면 링크를 추가할 예정입니다.
+[Chrome 웹 스토어에서 설치하기](https://chromewebstore.google.com/detail/nmfcdiflgghgkbjdlpnjmndgajjjmfco)
 
 ### 직접 설치 (개발자 모드)
 1. 이 저장소를 내려받습니다. (`Code` → `Download ZIP` 후 압축 해제)
