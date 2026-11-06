@@ -163,7 +163,13 @@ CHECK = """
     // 세로 위치: 제목(data-title 또는 .title/.tit) 높이에 맞는지
     const tEl = row.querySelector('[data-title], .title, .tit');
     if (tEl) { const tb = tEl.getBoundingClientRect(), cy = (d.top + d.bottom) / 2;
-      if (cy < tb.top - 2 || cy > tb.bottom + 2) errs.push(['제목 높이 아님', label(dot)]); }
+      if (cy < tb.top - 2 || cy > tb.bottom + 2) {
+        // 제목 줄에 자리가 없을 때는 같은 줄(카드)의 다른 글자 줄 높이에 붙는 것이 정상
+        const w = document.createTreeWalker(row, NodeFilter.SHOW_TEXT), rg = document.createRange(); let onLine = false;
+        while (!onLine && w.nextNode()) { const t = w.currentNode; if (!t.textContent.trim() || dot.contains(t)) continue; rg.selectNodeContents(t);
+          for (const r of rg.getClientRects()) if (r.height > 4 && Math.abs((r.top + r.bottom) / 2 - cy) <= 3) { onLine = true; break; } }
+        if (!onLine) errs.push(['제목 높이 아님', label(dot)]);
+      } }
     // 제목과 하트 사이에 사진·썸네일이 끼면 안 됨
     if (tEl) { const tb = tEl.getBoundingClientRect();
       for (const el of row.querySelectorAll('img, [class*=thumb], [class*=img]')) { if (el.contains(tEl)) continue; const r = el.getBoundingClientRect();

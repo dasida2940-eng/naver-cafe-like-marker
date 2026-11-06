@@ -413,43 +413,62 @@
     dot.setAttribute("aria-hidden", "true");
 
     const cands = candidates(row, title);
+    const p = { anchor: null, dot, title: link, pad: undefined, w: 0 };
+    const ok = () => !overlaps(dot, row) && !separated(title, dot, row);
+    const titleY = centerY(title);
     let chosen = null;
+
+    // 1) 제목 줄: 안쪽 칸부터 바깥쪽으로, 겹치지 않는 첫 자리
     for (const c of cands) {
       attach(dot, c);
-      positionDot(dot, c, title);
-      if (!overlaps(dot, row) && !separated(title, dot, row)) { chosen = c; break; }
+      positionDot(dot, c, titleY);
+      if (ok()) { chosen = c; break; }
     }
-    const p = { anchor: null, dot, title: link, pad: undefined, w: 0 };
+
+    // 2) 제목 줄에 여백을 줘서 글자를 비키게 함 (실제로 비켰는지 확인, 안 비키면 되돌림)
+    const target = chosen ? null : reserveTarget(title, cands[0]);
     if (!chosen) {
       chosen = cands[0];
       attach(dot, chosen);
-      // 여백은 제목이 혼자 한 줄을 차지하는 블록이면 제목에만 (같은 칸의 작성자·날짜 줄은 그대로),
-      // 제목 뒤에 N 아이콘 등이 나란히 붙는 가로 정렬(flex/grid) 줄이면 그 줄 전체에, 아니면 그 칸에
-      const parentDisplay = title.parentElement ? getComputedStyle(title.parentElement).display : "";
-      const inFlexRow = /flex|grid/.test(parentDisplay);
-      const target = inFlexRow ? title.parentElement : isBlock(title) ? title : chosen;
-      const cs = getComputedStyle(target);
-      const pad = parseFloat(cs.paddingRight) || 0;
-      p.pad = target.style.getPropertyValue("padding-right");
-      p.padTarget = target;
-      const dotW = dot.getBoundingClientRect().width;
-      let offset = 6; // 하트의 오른쪽 거리
-      const apply = () => {
-        dot.style.setProperty("right", offset + "px", "important");
-        target.style.setProperty("padding-right", Math.ceil(pad + offset + dotW + 4) + "px", "important");
-        positionDot(dot, chosen, title);
-      };
-      apply();
-      // 여백을 줘도 비키지 않는 것(오른쪽 끝에 고정된 새 글 아이콘 등)과 겹치면 하트를 그 왼쪽으로 옮김
+      reserve(p, target, dot, 6);
+      positionDot(dot, chosen, centerY(title));
+      if (!ok()) {
+        unreserve(p, dot);
+        chosen = null;
+      }
+    }
+
+    // 3) 제목 줄에 자리가 없으면 같은 칸 아래쪽 줄(작성자·날짜 줄 등)의 오른쪽 빈자리
+    if (!chosen) {
+      for (const y of otherLines(row, title)) {
+        for (const c of cands) {
+          const r = c.getBoundingClientRect();
+          if (y < r.top || y > r.bottom) continue;
+          attach(dot, c);
+          positionDot(dot, c, y);
+          if (ok()) { chosen = c; break; }
+        }
+        if (chosen) break;
+      }
+    }
+
+    // 4) 그래도 없으면 제목 줄에 여백을 주고, 비키지 않는 아이콘의 왼쪽으로 하트를 옮김
+    if (!chosen) {
+      chosen = cands[0];
+      attach(dot, chosen);
+      let offset = 6;
+      reserve(p, target, dot, offset);
+      positionDot(dot, chosen, centerY(title));
       for (let i = 0; i < 3; i++) {
         const ob = findOverlap(dot, row);
         if (!ob) break;
         const a = chosen.getBoundingClientRect();
         const edge = a.right - (parseFloat(getComputedStyle(chosen).borderRightWidth) || 0);
         const next = Math.ceil(edge - ob.left + 4);
-        if (next <= offset || next > a.width - dotW) break;
+        if (next <= offset || next > a.width - dot.getBoundingClientRect().width) break;
         offset = next;
-        apply();
+        reserve(p, target, dot, offset);
+        positionDot(dot, chosen, centerY(title));
       }
     }
     p.anchor = chosen;
@@ -457,6 +476,60 @@
     placed.set(row, p);
     rowOfAnchor.set(chosen, row);
     resizeObs.observe(chosen);
+  }
+
+
+  // 여백을 줄 대상: 제목이 혼자 한 줄인 블록이면 제목에만 (같은 칸의 작성자·날짜 줄은 그대로),
+  // 제목 뒤에 N 아이콘 등이 나란히 붙는 가로 정렬(flex/grid) 줄이면 그 줄 전체에, 아니면 그 칸에
+  function reserveTarget(title, cell) {
+    const parentDisplay = title.parentElement ? getComputedStyle(title.parentElement).display : "";
+    if (/flex|grid/.test(parentDisplay)) return title.parentElement;
+    return isBlock(title) ? title : cell;
+  }
+
+  function reserve(p, target, dot, offset) {
+    if (p.pad === undefined) {
+      p.pad = target.style.getPropertyValue("padding-right");
+      p.padBase = parseFloat(getComputedStyle(target).paddingRight) || 0;
+      p.padTarget = target;
+    }
+    dot.style.setProperty("right", offset + "px", "important");
+    const w = dot.getBoundingClientRect().width;
+    target.style.setProperty("padding-right", Math.ceil(p.padBase + offset + w + 4) + "px", "important");
+  }
+
+  function unreserve(p, dot) {
+    if (p.pad === undefined) return;
+    if (p.pad) p.padTarget.style.setProperty("padding-right", p.pad);
+    else p.padTarget.style.removeProperty("padding-right");
+    dot.style.removeProperty("right");
+    p.pad = undefined;
+  }
+
+  // 제목(눈에 보이는 부분)의 세로 가운데
+  function centerY(title) {
+    const t = visibleBox(title, title.getBoundingClientRect());
+    const r = t || title.getBoundingClientRect();
+    return (r.top + r.bottom) / 2;
+  }
+
+  // 제목 아래쪽에 있는 다른 글자 줄들의 세로 가운데 (위에서부터)
+  function otherLines(row, title) {
+    const tb = title.getBoundingClientRect();
+    const ys = [];
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    while (walker.nextNode() && ys.length < 6) {
+      const t = walker.currentNode;
+      if (!t.textContent.trim() || title.contains(t)) continue;
+      range.selectNodeContents(t);
+      for (const r of range.getClientRects()) {
+        if (r.height < 4 || r.top < tb.bottom - 1) continue;
+        const y = (r.top + r.bottom) / 2;
+        if (!ys.some((v) => Math.abs(v - y) < 6)) ys.push(y);
+      }
+    }
+    return ys.sort((a, b) => a - b);
   }
 
   function unplace(row) {
@@ -514,14 +587,12 @@
     });
   }
 
-  // 하트의 세로 위치를 제목(눈에 보이는 부분)의 가운데에 맞춤
-  function positionDot(dot, anchor, title) {
-    const t = visibleBox(title, title.getBoundingClientRect());
+  // 하트의 세로 위치를 화면 기준 y(줄의 가운데)에 맞춤
+  function positionDot(dot, anchor, y) {
     const a = anchor.getBoundingClientRect();
-    if (!t || !a.height) return;
+    if (!a.height) return;
     const border = parseFloat(getComputedStyle(anchor).borderTopWidth) || 0;
-    const y = (t.top + t.bottom) / 2 - a.top - border + anchor.scrollTop;
-    dot.style.setProperty("top", Math.round(y) + "px", "important");
+    dot.style.setProperty("top", Math.round(y - a.top - border + anchor.scrollTop) + "px", "important");
   }
 
   // 화면에서 실제로 보이는 부분 (overflow:hidden 으로 잘린 부분 제외)
