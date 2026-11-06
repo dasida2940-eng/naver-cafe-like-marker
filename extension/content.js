@@ -350,12 +350,17 @@
         if (!placed.has(row)) place(row, title);
       });
     }
-    // 이전글·다음글 버튼 안의 하트
-    document.querySelectorAll(".ncl-nav-heart").forEach((h) => {
-      if (!navLinks.has(h.parentElement) || h.dataset.style !== heartStyle) h.remove();
-      else navLinks.delete(h.parentElement);
+    // 이전글·다음글 버튼: 표시 방식에 따라 버튼 배경 / 버튼 안 하트
+    document.querySelectorAll(".ncl-nav-liked").forEach((a) => {
+      if (!showBg || !navLinks.has(a)) a.classList.remove("ncl-nav-liked");
     });
-    navLinks.forEach((a) => {
+    if (showBg) navLinks.forEach((a) => a.classList.contains("ncl-nav-liked") || a.classList.add("ncl-nav-liked"));
+    const navHearts = showHeart ? new Set(navLinks) : new Set();
+    document.querySelectorAll(".ncl-nav-heart").forEach((h) => {
+      if (!navHearts.has(h.parentElement) || h.dataset.style !== heartStyle) h.remove();
+      else navHearts.delete(h.parentElement);
+    });
+    navHearts.forEach((a) => {
       const h = document.createElement("span");
       h.className = heartStyle === "icon" ? "ncl-nav-heart ncl-icon" : "ncl-nav-heart";
       h.dataset.style = heartStyle;

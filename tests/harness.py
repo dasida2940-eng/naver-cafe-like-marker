@@ -131,8 +131,12 @@ CHECK = """
     if (Math.abs(b.left - l) > 0.5 || (!reservedAnc && Math.abs(b.width - w) > 0.5)) errs.push(['칸 밀림', c.textContent.trim().slice(0, 12)]);
   });
   // 7) 이전글·다음글 버튼: 버튼 안에 하트 1개, 다른 곳엔 없음
-  document.querySelectorAll('[data-navexpect]').forEach(a => { const n = a.querySelectorAll('.ncl-nav-heart').length; if (n !== 1) errs.push([`버튼 하트 ${n}개`, a.textContent.trim().slice(0, 8)]); });
-  document.querySelectorAll('.ncl-nav-heart').forEach(h => { if (!h.closest('[data-navexpect]')) errs.push(['버튼 아닌 곳에 버튼 하트', h.parentElement.textContent.trim().slice(0, 12)]); });
+  document.querySelectorAll('[data-navexpect]').forEach(a => {
+    const n = a.querySelectorAll('.ncl-nav-heart').length, want = showHeart ? 1 : 0;
+    if (n !== want) errs.push([`버튼 하트 ${n}개(기대 ${want})`, a.textContent.trim().slice(0, 8)]);
+    if (a.classList.contains('ncl-nav-liked') !== showBg) errs.push(['버튼 배경 ' + (showBg ? '누락' : '불필요'), a.textContent.trim().slice(0, 8)]);
+  });
+  document.querySelectorAll('.ncl-nav-heart, .ncl-nav-liked').forEach(h => { if (!h.closest('[data-navexpect]')) errs.push(['버튼 아닌 곳에 버튼 표시', h.textContent.trim().slice(0, 12)]); });
   // 6) 사진·썸네일·아이콘 크기 그대로
   const boxes = [...document.querySelectorAll('img, a, span, div')].filter(e => !e.firstElementChild && !e.textContent.trim() && !e.classList.contains('ncl-heart-dot'));
   boxes.forEach((e, i) => { const b = e.getBoundingClientRect(), o = before.boxes[i];

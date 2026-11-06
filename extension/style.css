@@ -46,6 +46,11 @@ tr.ncl-liked-row > td {
   padding: 0 6px;
 }
 
+/* 이전글·다음글 버튼 배경: 버튼 원래 색 위에 반투명 분홍을 겹침 (버튼 모양은 그대로) */
+.ncl-nav-liked {
+  background-image: linear-gradient(rgba(255, 77, 109, 0.14), rgba(255, 77, 109, 0.14)) !important;
+}
+
 /* 이전글·다음글 버튼 안의 하트 (버튼 글자 옆에 나란히) */
 .ncl-nav-heart {
   display: inline-block !important;
