@@ -970,13 +970,33 @@
     return { scope, items: [...seen.values()] };
   }
 
-  // 페이지 번호 줄 정보: 버튼들, 번호 버튼들, 지금 페이지 번호
+  // 페이지 이동 영역: 목록 근처에 없으면 바깥쪽으로 넓혀 가며 찾음 (목록과 떨어져 있는 경우)
+  const PAGER_HINT =
+    "[class*='paginat' i], [class*='paging' i], [class*='page_next' i], [class*='page-next' i], [class*='btn_next' i], [class*='pager' i], [aria-label*='페이지']";
+  function pagerRoot(scope) {
+    let r = scope;
+    for (let i = 0; i < 6 && r && r !== document.documentElement; i++) {
+      const hit = [...r.querySelectorAll(PAGER_HINT)].find((e) => !e.closest(NOT_LIST_SELECTOR));
+      if (hit) return r;
+      r = r.parentElement;
+    }
+    return scope;
+  }
+
+  // 페이지 번호 줄 정보: 버튼들, 번호 버튼들, 지금 페이지 번호, 전체 페이지 수(알 때만)
   function pagerInfo(scope, tab) {
-    if (!scope) return { btns: [], nums: [], curNo: 1 };
+    if (!scope) return { btns: [], nums: [], curNo: 1, total: null };
+    const root = pagerRoot(scope);
     const after = (e) => tab.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING;
-    const btns = [...scope.querySelectorAll("a, button")].filter((b) => after(b) && b.getClientRects().length && !b.disabled && b.getAttribute("aria-disabled") !== "true");
+    const btns = [...root.querySelectorAll("a, button")].filter(
+      (b) => after(b) && !b.closest(NOT_LIST_SELECTOR) && b.getClientRects().length && !b.disabled && b.getAttribute("aria-disabled") !== "true"
+    );
     const nums = btns.filter((b) => /^\d{1,4}$/.test(norm(b.textContent)));
-    return { btns, nums, curNo: currentPageNo(nums) };
+    // "1 / 12" 형태: 현재 페이지·총 페이지 수 표시
+    const curEl = [...root.querySelectorAll("[aria-label*='현재'], [class*='current' i]")].find((e) => /^\d{1,5}$/.test(norm(e.textContent)) && after(e));
+    const totEl = [...root.querySelectorAll("[aria-label*='총'], [aria-label*='전체'], [class*='total' i]")].find((e) => /^\d{1,5}$/.test(norm(e.textContent)) && after(e));
+    const curNo = curEl ? +norm(curEl.textContent) : currentPageNo(nums);
+    return { btns, nums, curNo, total: totEl ? +norm(totEl.textContent) : null };
   }
 
   function currentPageNo(nums) {
@@ -994,7 +1014,7 @@
 
   // 1쪽으로 돌아가기 (다른 페이지를 보던 중에 눌러도 처음부터 읽도록)
   async function goToFirstPage(tab) {
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 500; i++) {
       const { scope, items } = listLinks(tab);
       const { btns, nums, curNo } = pagerInfo(scope, tab);
       if (curNo <= 1) return tab;
@@ -1025,7 +1045,8 @@
   // 페이지 번호 줄에서 다음 페이지 버튼
   function findNextPage(scope, tab) {
     if (!scope) return null;
-    const { btns, nums, curNo } = pagerInfo(scope, tab);
+    const { btns, nums, curNo, total } = pagerInfo(scope, tab);
+    if (total && curNo >= total) return null; // 마지막 페이지
     const next = nums.find((b) => +norm(b.textContent) === curNo + 1);
     if (next) return next;
     // 번호 묶음의 끝이면 "다음" 버튼
@@ -1172,11 +1193,16 @@
         s.total += items.length;
         const added = addLiked(items);
         s.added += added;
-        importStatus = { state: "running", pages: s.pages, added: s.added, total: s.total, mode: s.mode };
+        const info = pagerInfo(scope, tab);
+        importStatus = { state: "running", pages: s.pages, added: s.added, total: s.total, mode: s.mode, totalPages: info.total };
         // 새 좋아요만 확인: 최근 순이므로 이미 가진 글만 있는 페이지가 나오면 그 뒤도 다 가진 글
         if (s.mode === "new" && items.length && added === 0) { finished = true; break; }
         const next = findNextPage(scope, tab);
-        if (!next) { finished = true; break; }
+        if (!next) {
+          // 총 페이지 수를 아는데 아직 마지막이 아니면 다음 버튼을 못 찾은 것 → "다 읽음"으로 기록하지 않음
+          finished = !(info.total && info.curNo < info.total);
+          break;
+        }
         if (stopRequested) break;
         const before = items.map((i) => i.a).join(",");
         writeSession(s); // 페이지가 새로 로드되면 거기서 이어 읽음

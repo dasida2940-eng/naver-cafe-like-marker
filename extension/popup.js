@@ -74,7 +74,8 @@ function refresh() {
     }
     const s = res.status || {};
     if (res.crawling) {
-      imsg.textContent = `가져오는 중… ${s.pages}페이지 (새로 ${s.added}개)\n이 창을 닫아도 계속돼요. 카페 화면을 벗어나면 멈춰요.`;
+      const pg = s.totalPages ? `${s.pages} / ${s.totalPages}페이지` : `${s.pages}페이지`;
+      imsg.textContent = `가져오는 중… ${pg} (새로 ${s.added}개)\n이 창을 닫아도 계속돼요. 카페 화면을 벗어나면 멈춰요.\n그 탭을 화면에 띄워 두면 더 빨라요.`;
       buttons([["중지", () => ask("stop", {}, () => setTimeout(refresh, 300))]]);
       poll = setTimeout(refresh, 500);
       return;

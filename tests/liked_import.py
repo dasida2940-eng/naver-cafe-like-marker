@@ -95,6 +95,33 @@ PAGE_C = f"""<!doctype html><html><head><meta charset="utf-8"><style>{CSS}
 <ul id="list">{''.join(f'<li><a href="https://cafe.naver.com/f-e/cafes/333/articles/{3000+i}">글 {3000+i}</a></li>' for i in range(4))}</ul></main></div></body></html>"""
 
 
+# E: 실제 화면 형태 — "1 / 2" + 이전·다음 버튼, 페이지 이동 영역이 목록과 떨어져 있음
+def page_e(total=40, per=15):
+    return f"""<!doctype html><html><head><meta charset="utf-8"><style>{CSS}
+.blind{{position:absolute;clip:rect(0 0 0 0);width:1px;height:1px;overflow:hidden}}
+.paginate_number{{display:flex;gap:8px;align-items:center;margin-top:12px}} .page_prev,.page_next{{width:28px;height:28px;border:1px solid #ccc;background:#fff}}
+.page_prev::before{{content:"<"}} .page_next::before{{content:">"}} .current_page{{color:#03c75a}}</style></head><body><div class="layout">{SIDE}
+<main><div class="member_area"><div class="tab_area"><ul class="tabs"><li><a href="#">작성글</a></li><li><a href="#">작성댓글</a></li><li><a href="#">댓글단 글</a></li><li class="on"><a href="#" aria-selected="true">좋아요한 글</a></li></ul></div>
+<div class="article_board"><table><tbody id="tb"></tbody></table></div></div>
+<div class="like_paginate_area"><strong class="blind">페이징 이동</strong><div class="paginate_number"><button type="button" class="page_prev"><span class="blind">이전</span></button><span class="page_num"><strong aria-label="현재페이지" class="current_page">1</strong><span>/</span><span aria-label="총 페이지 수" class="total_page">1</span></span><button type="button" class="page_next"><span class="blind">다음</span></button></div></div>
+</main></div>
+<script>
+const TOTAL = {total}, PER = {per}, PAGES = Math.ceil(TOTAL / PER);
+let page = +(new URLSearchParams(location.search).get('start') || 1);
+function render() {{
+  const ids = Array.from({{length: TOTAL}}, (_, i) => 5000 + i).slice((page - 1) * PER, page * PER);
+  document.getElementById('tb').innerHTML = ids.map(id => `<tr><td class="td_article"><div class="board-list"><div class="inner_list"><a class="article" href="/ArticleRead.nhn?clubid=31580371&articleid=${{id}}" target="_blank">글 ${{id}}</a></div></div></td><td>작성자</td><td>2026.11.05.</td></tr>`).join('');
+  document.querySelector('.current_page').textContent = page;
+  document.querySelector('.total_page').textContent = PAGES;
+  document.querySelector('.page_prev').disabled = page <= 1;
+  document.querySelector('.page_next').disabled = page >= PAGES;
+}}
+document.querySelector('.page_next').addEventListener('click', () => {{ page++; setTimeout(render, 150); }});
+document.querySelector('.page_prev').addEventListener('click', () => {{ page--; setTimeout(render, 150); }});
+render();
+</script></body></html>"""
+
+
 async def open_page(p, html_fn, path):
     b = await p.chromium.launch()
     ctx = await b.new_context(viewport={"width": 1100, "height": 800})
@@ -211,6 +238,31 @@ async def main():
         got = await stored(pg)
         check("B2: 2쪽에서 눌러도 1쪽부터 3쪽 25개", len(got) == 25 and st and st["status"]["pages"] == 3, f"{len(got)}개 / {st and st['status']}")
         check("B2: 오류 없음", not errors, "; ".join(errors[:2]))
+        await b.close()
+
+        # ---- E: 실제 화면 형태 ("1 / 3" + 이전·다음, 페이지 이동 영역이 떨어져 있음)
+        b, pg, errors = await open_page(p, lambda u: page_e(40, 15), "/f-e/cafes/31580371/members/abc?tab=liked")
+        await pg.wait_for_timeout(1200)
+        await send(pg, "start", mode="full")
+        st = await wait_done(pg, 40000)
+        got = await stored(pg)
+        check("E: '1 / 3' + 다음 버튼으로 3쪽 40개 모두", len(got) == 40 and st and st["status"]["pages"] == 3 and st["complete"], f"{len(got)}개 / {st and st['status']}")
+        check("E: 오류 없음", not errors, "; ".join(errors[:2]))
+        await b.close()
+        # E3: 다음 버튼이 없어져서 1/3에서 멈추면 "다 읽음"으로 기록하지 않음
+        b, pg, errors = await open_page(p, lambda u: page_e(40, 15).replace('<button type="button" class="page_next">', '<button type="button" class="page_next" style="display:none">'), "/f-e/cafes/31580371/members/abc?tab=liked")
+        await pg.wait_for_timeout(1200)
+        await send(pg, "start", mode="full")
+        st = await wait_done(pg, 20000)
+        check("E3: 1/3에서 다음 버튼을 못 찾으면 '중간에 멈춤', 다 읽음으로 기록 안 함", st and st["status"]["state"] == "interrupted" and not st["complete"], str(st and st["status"]))
+        await b.close()
+        # E2: 3쪽을 보다가 누르면 이전 버튼으로 1쪽까지 돌아가서 처음부터
+        b, pg, errors = await open_page(p, lambda u: page_e(40, 15), "/f-e/cafes/31580371/members/abc?tab=liked&start=3")
+        await pg.wait_for_timeout(1200)
+        await send(pg, "start", mode="full")
+        st = await wait_done(pg, 40000)
+        got = await stored(pg)
+        check("E2: 3쪽에서 눌러도 이전 버튼으로 1쪽부터 40개", len(got) == 40 and st and st["status"]["pages"] == 3, f"{len(got)}개 / {st and st['status']}")
         await b.close()
 
         # ---- C: 글자 색으로만 선택 표시
