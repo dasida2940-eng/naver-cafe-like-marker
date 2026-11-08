@@ -442,14 +442,22 @@
     if (DEBUG) debug("자리 정하기", { title: norm(title.textContent).slice(0, 20), step1: !!chosen && !dot.style.getPropertyValue("left") ? "오른쪽 끝" : chosen ? "내용 뒤" : "실패", obstacle: describe(findOverlap(dot, row)), separated: separated(title, dot, row) });
 
     // 2) 제목 줄에 여백을 줘서 글자를 비키게 함 (실제로 비켰는지 확인, 안 비키면 되돌림)
+    //    줄바꿈 안 되는 제목이 여백 때문에 잘리거나 옆 칸으로 넘치면 여백을 쓰지 않음
     const target = chosen ? null : reserveTarget(title, cands[0]);
+    let canReserve = !chosen;
     if (!chosen) {
       chosen = cands[0];
       attach(dot, chosen);
       resetPos(dot);
+      const lostBefore = lostWidth(title);
       reserve(p, target, dot, 6);
+      canReserve = lostWidth(title) <= lostBefore + 1;
       positionDot(dot, chosen, centerY(title));
-      if (!ok()) {
+      if (!canReserve) {
+        unreserve(p, dot);
+        chosen = null;
+        if (DEBUG) debug("여백을 주면 제목이 잘려서 여백 안 씀", {});
+      } else if (!ok()) {
         // 여백 때문에 뒤의 아이콘 등이 다음 줄로 내려가 새 자리가 생겼을 수 있음 → 여백을 둔 채 아래 줄 확인
         chosen = tryOtherLines(dot, cands, row, title, ok);
         if (!chosen) unreserve(p, dot);
@@ -460,6 +468,18 @@
     if (!chosen) chosen = tryOtherLines(dot, cands, row, title, ok);
 
     // 4) 그래도 없으면 제목 줄에 여백을 주고, 비키지 않는 아이콘의 왼쪽으로 하트를 옮김
+    if (!chosen && !canReserve) {
+      // 여백을 못 주는 줄: 제목 줄 오른쪽 끝에 두되, 비키지 않는 아이콘이 있으면 그 왼쪽으로 (글자는 덮지 않음)
+      chosen = cands[0];
+      attach(dot, chosen);
+      resetPos(dot);
+      positionDot(dot, chosen, titleY);
+      const before = dot.style.getPropertyValue("right");
+      if (!(shiftLeftOfBoxes(dot, chosen, row) && !(findOverlap(dot, row) || {}).text)) {
+        if (before) dot.style.setProperty("right", before, "important"); else dot.style.removeProperty("right");
+      }
+      if (DEBUG) debug("마지막 단계(여백 없이)", { obstacle: describe(findOverlap(dot, row)) });
+    }
     if (!chosen) {
       chosen = cands[0];
       attach(dot, chosen);
@@ -536,6 +556,34 @@
     dot.style.setProperty("right", offset + "px", "important");
     const w = dot.getBoundingClientRect().width;
     target.style.setProperty("padding-right", Math.ceil(p.padBase + offset + w + 4) + "px", "important");
+  }
+
+  // 칸 밖(옆 칸)으로 넘쳐 나간 글자 폭의 합
+  // 상자 안에서 잘리거나 말줄임(…)되는 글자는 원래 그렇게 보이는 것이므로 세지 않음
+  function lostWidth(title) {
+    const cell = title.closest("td, th, li") || title.parentElement;
+    if (!cell) return 0;
+    const cb = cell.getBoundingClientRect();
+    const cellRight = cb.right - (parseFloat(getComputedStyle(cell).paddingRight) || 0) + 1;
+    let lost = 0;
+    const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    while (walker.nextNode()) {
+      const t = walker.currentNode;
+      if (!t.textContent.trim() || t.parentElement.closest(".ncl-heart-dot")) continue;
+      let clipped = false;
+      for (let a = t.parentElement; a; a = a.parentElement) {
+        if (getComputedStyle(a).overflowX !== "visible") { clipped = true; break; }
+        if (a === cell) break;
+      }
+      if (clipped) continue;
+      range.selectNodeContents(t);
+      for (const r of range.getClientRects()) {
+        if (r.width < 2 || r.height < 2) continue;
+        lost += Math.max(0, r.right - Math.max(cellRight, r.left));
+      }
+    }
+    return lost;
   }
 
   function unreserve(p, dot) {
