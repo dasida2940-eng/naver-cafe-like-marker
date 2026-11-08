@@ -606,6 +606,7 @@
   }
 
   // 여백 때문에 안 보이게 된 내용의 폭 (하트 자리를 만들다 다른 것을 가리지 않았는지 확인용)
+  // part: "title" = 제목 글자, "other" = 제목 외 내용
   // - 제목 외 내용(아이콘·사진·댓글 수 등): 상자에 잘리거나 말줄임되거나 칸 밖으로 넘친 폭
   // - 제목 글자: 칸 밖(옆 칸)으로 넘친 폭만 (상자 안에서 잘리거나 말줄임되는 건 원래 그렇게 보이는 것)
   function lostWidth(link, part) {
@@ -642,9 +643,7 @@
       if (link.contains(el)) continue;
       for (const r of el.getClientRects()) measure(el, r, false);
     }
-    if (part === "title") return lostTitle;
-    if (part === "other") return lost;
-    return lost + lostTitle;
+    return part === "title" ? lostTitle : lost;
   }
 
   // 한 줄 고정(줄바꿈 안 됨) 줄에서 여백 때문에 뒤의 아이콘·댓글 수가 밀려나 가려지면,
@@ -1094,7 +1093,6 @@
   const IMPORT_KEY = "likeImport";          // { 카페: { complete: 끝까지 읽었는지, at: 시각 } }
   const CRAWL_SESSION = "ncl-like-crawl";    // 페이지가 새로 로드되는 목록에서 이어 읽기용
   const LIKED_TAB_TEXT = /^좋아요\s?한\s?글(\s*\(?\d[\d,]*\)?)?$/;
-  const OTHER_TAB_TEXT = /^(작성\s?글|댓글|댓글\s?단\s?글|작성\s?댓글|임시\s?저장|.{1,8})(\s*\(?\d[\d,]*\)?)?$/;
   const NOT_LIST_SELECTOR =
     "aside, nav, header, footer, [role='navigation'], [class*='side' i], [class*='lnb' i], [class*='gnb' i], " +
     "[class*='popular' i], [class*='best' i], [class*='recommend' i], [class*='ranking' i], [class*='banner' i]";
