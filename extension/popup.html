@@ -14,6 +14,8 @@
   .heart.icon { padding: 0 5px; }
   #style.off { opacity: .4; pointer-events: none; }
   .count { margin-top: 10px; color: #888; font-size: 12px; }
+  .backup { margin-top: 10px; width: 100%; padding: 7px 0; border: 1px solid #e3e3e8; border-radius: 6px; background: #fafafa; font: 12px "Malgun Gothic", sans-serif; color: #444; cursor: pointer; }
+  .backup:hover { background: #f0f0f3; }
 </style>
 </head>
 <body>
@@ -29,6 +31,7 @@
   </div>
 
   <div class="count" id="count"></div>
+  <button id="backup" class="backup">기록 백업·가져오기</button>
   <script src="popup.js"></script>
 </body>
 </html>
