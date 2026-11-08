@@ -492,6 +492,25 @@
       }
     }
 
+    // 2-2) 표처럼 배치된 줄(네이버 전체글보기 등)은 안쪽 상자에 여백을 줘도 표가 늘어날 뿐 내용이 안 비킴
+    //      → 바깥 칸(board-list, td …)에 차례로 여백을 줘서, 내용이 실제로 비키고 아무것도 안 가려지는 곳을 씀
+    if (!chosen && cands.length > 1) {
+      const titleBefore = lostWidth(link, "title"), otherBefore = lostWidth(link, "other");
+      for (const c of cands.slice(1)) {
+        attach(dot, c);
+        resetPos(dot);
+        reserve(p, c, dot, 6);
+        positionDot(dot, c, centerY(title));
+        if (ok() && lostWidth(link, "title") <= titleBefore + 1 && lostWidth(link, "other") <= otherBefore + 1) {
+          chosen = c;
+          canReserve = true;
+          if (DEBUG) debug("바깥 칸에 여백", { el: describe({ el: c, text: false, left: 0, right: 0 }) });
+          break;
+        }
+        unreserve(p, dot);
+      }
+    }
+
     // 3) 제목 줄에 자리가 없으면 같은 칸 아래쪽 줄(작성자·날짜 줄 등)의 오른쪽 빈자리 (줄 안쪽만)
     if (!chosen) chosen = tryOtherLines(dot, cands, row, title, ok);
 

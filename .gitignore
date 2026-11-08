@@ -3,3 +3,5 @@
 __pycache__/
 tests/out/
 naver-cafe-like-marker-store-v*.zip
+tests/pages/naver_css/
+tests/pages/p20_real_allarticles.html
