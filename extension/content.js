@@ -970,25 +970,62 @@
     return { scope, items: [...seen.values()] };
   }
 
-  // 페이지 번호 줄에서 다음 페이지 버튼
-  function findNextPage(scope, tab) {
-    if (!scope) return null;
+  // 페이지 번호 줄 정보: 버튼들, 번호 버튼들, 지금 페이지 번호
+  function pagerInfo(scope, tab) {
+    if (!scope) return { btns: [], nums: [], curNo: 1 };
     const after = (e) => tab.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING;
     const btns = [...scope.querySelectorAll("a, button")].filter((b) => after(b) && b.getClientRects().length && !b.disabled && b.getAttribute("aria-disabled") !== "true");
     const nums = btns.filter((b) => /^\d{1,4}$/.test(norm(b.textContent)));
-    // 지금 페이지: 선택 표시가 있거나, 번호 줄에서 링크가 아닌 번호(span/strong)
-    let current = nums.find((b) => looksActive(b));
-    let curNo = current ? +norm(current.textContent) : null;
-    if (curNo == null && nums.length) {
-      const bar = nums[0].parentElement && nums[0].parentElement.closest("div, ul, nav, p") ;
+    return { btns, nums, curNo: currentPageNo(nums) };
+  }
+
+  function currentPageNo(nums) {
+    const current = nums.find((b) => looksActive(b));
+    if (current) return +norm(current.textContent);
+    if (nums.length) {
+      const bar = nums[0].parentElement && nums[0].parentElement.closest("div, ul, nav, p");
       const plain = bar && [...bar.querySelectorAll("strong, span, em")].find((e) => /^\d{1,4}$/.test(norm(e.textContent)) && !e.closest("a, button"));
-      if (plain) curNo = +norm(plain.textContent);
-      else {
-        const diff = nums.find((b) => differsFromSiblings(b));
-        if (diff) curNo = +norm(diff.textContent);
-      }
+      if (plain) return +norm(plain.textContent);
+      const diff = nums.find((b) => differsFromSiblings(b));
+      if (diff) return +norm(diff.textContent);
     }
-    if (curNo == null) curNo = 1;
+    return 1;
+  }
+
+  // 1쪽으로 돌아가기 (다른 페이지를 보던 중에 눌러도 처음부터 읽도록)
+  async function goToFirstPage(tab) {
+    for (let i = 0; i < 60; i++) {
+      const { scope, items } = listLinks(tab);
+      const { btns, nums, curNo } = pagerInfo(scope, tab);
+      if (curNo <= 1) return tab;
+      const one = nums.find((b) => norm(b.textContent) === "1");
+      const back =
+        one ||
+        btns.find((b) => /(^|\s|[-_])(처음|맨\s?앞|first)($|\s|[-_])/i.test(norm(b.textContent) + " " + (b.getAttribute("aria-label") || "") + " " + b.className)) ||
+        btns.find((b) => /(^|\s|[-_])(이전|prev)($|\s|[-_]|\s?페이지)/i.test(norm(b.textContent) + " " + (b.getAttribute("aria-label") || "") + " " + b.className) && !/이전\s?글/.test(norm(b.textContent)));
+      if (!back) return tab;
+      const before = items.map((x) => x.a).join(",");
+      writeSessionFirst();
+      back.click();
+      let changed = false;
+      for (let w = 0; w < 40; w++) {
+        await sleep(200);
+        const t2 = findLikedTab();
+        if (!t2) return null;
+        tab = t2;
+        const now = listLinks(tab).items.map((x) => x.a).join(",");
+        if (now && now !== before) { changed = true; break; }
+      }
+      if (!changed) return tab;
+      await sleep(300);
+    }
+    return tab;
+  }
+
+  // 페이지 번호 줄에서 다음 페이지 버튼
+  function findNextPage(scope, tab) {
+    if (!scope) return null;
+    const { btns, nums, curNo } = pagerInfo(scope, tab);
     const next = nums.find((b) => +norm(b.textContent) === curNo + 1);
     if (next) return next;
     // 번호 묶음의 끝이면 "다음" 버튼
@@ -1020,49 +1057,10 @@
     return ctx.c || ctx.n || location.pathname.split("/").slice(0, 4).join("/");
   }
 
-  // ----- 패널: 좋아요한 글 탭에서만 화면 오른쪽 아래에 뜸, 버튼을 눌러야 가져옴 -----
-  let panelClosed = false;
+  // ----- 확장 팝업의 버튼으로 시작·중지, 진행 상황은 팝업이 물어볼 때 알려 줌 -----
   let stopRequested = false;
-
-  function panel() {
-    let el = document.getElementById("ncl-panel");
-    if (!el) {
-      el = document.createElement("div");
-      el.id = "ncl-panel";
-      el.setAttribute("role", "region");
-      el.setAttribute("aria-label", "좋아요 표시");
-      el.innerHTML =
-        '<button type="button" class="ncl-x" aria-label="닫기">×</button>' +
-        '<div class="ncl-title">♥ 좋아요 표시</div><div class="ncl-msg"></div><div class="ncl-btns"></div>';
-      el.querySelector(".ncl-x").addEventListener("click", () => {
-        if (crawling) stopRequested = true;
-        panelClosed = true;
-        el.remove();
-      });
-      (document.body || document.documentElement).appendChild(el);
-    }
-    return el;
-  }
-
-  function setPanel(msg, buttons) {
-    const el = panel();
-    el.querySelector(".ncl-msg").textContent = msg;
-    const box = el.querySelector(".ncl-btns");
-    box.textContent = "";
-    (buttons || []).forEach(([label, fn, primary]) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = label;
-      if (primary) b.className = "ncl-primary";
-      b.addEventListener("click", fn);
-      box.appendChild(b);
-    });
-  }
-
-  function hidePanel() {
-    const el = document.getElementById("ncl-panel");
-    if (el && !crawling) el.remove();
-  }
+  // 마지막 가져오기 상태 (팝업에 보여 줄 내용)
+  let importStatus = { state: "idle", pages: 0, added: 0, total: 0, mode: "" };
 
   function readImportState(cb) {
     chrome.storage.local.get([IMPORT_KEY], (r) => cb(r[IMPORT_KEY] || {}));
@@ -1074,30 +1072,47 @@
     });
   }
 
-  function showReady(tab) {
-    if (panelClosed || crawling) return;
-    const key = cafeKey();
-    readImportState((map) => {
-      const st = map[key];
-      const complete = st && typeof st === "object" && st.complete;
-      if (complete) {
-        const when = new Date(st.at);
-        setPanel(`이 카페의 좋아요한 글은 ${when.getMonth() + 1}월 ${when.getDate()}일에 모두 가져왔어요.`, [
-          ["새 좋아요만 확인", () => startCrawl("new"), true],
-          ["전부 다시 가져오기", () => startCrawl("full")]
-        ]);
-      } else {
-        setPanel("이 카페에서 좋아요한 글을 가져와서 목록에 표시할 수 있어요. 글이 많으면 시간이 조금 걸려요.", [
-          ["좋아요한 글 모두 가져오기", () => startCrawl("full"), true]
-        ]);
+  function startCrawl(mode) {
+    const tab = findLikedTab();
+    if (!tab || crawling) return false;
+    crawl(tab, { cafe: cafeKey(), mode, total: 0, added: 0, pages: 0, started: false });
+    return true;
+  }
+
+  // 팝업과 주고받기: 좋아요한 글 탭이 있는 화면(프레임)만 대답함
+  if (chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (!msg || msg.type !== "ncl-import") return false;
+      const tab = findLikedTab();
+      if (!tab && !crawling && importStatus.state === "idle") return false;
+      if (msg.action === "start") {
+        sendResponse({ ok: startCrawl(msg.mode === "new" ? "new" : "full") });
+        return false;
       }
+      if (msg.action === "stop") {
+        stopRequested = true;
+        sendResponse({ ok: true });
+        return false;
+      }
+      // status
+      readImportState((map) => {
+        const st = map[cafeKey()];
+        sendResponse({
+          onLikedTab: !!tab,
+          crawling,
+          status: importStatus,
+          complete: !!(st && typeof st === "object" && st.complete),
+          completeAt: st && st.at
+        });
+      });
+      return true;
     });
   }
 
-  function startCrawl(mode) {
-    const tab = findLikedTab();
-    if (!tab || crawling) return;
-    crawl(tab, { cafe: cafeKey(), mode, total: 0, added: 0, pages: 0 });
+  // 1쪽으로 가는 중 페이지가 새로 로드되는 경우를 위해 세션을 남겨 둠 (started=false → 도착 후 다시 1쪽 확인)
+  let pendingStart = null;
+  function writeSessionFirst() {
+    if (pendingStart) writeSession({ ...pendingStart, started: false });
   }
 
   function readSession() {
@@ -1130,18 +1145,10 @@
   function checkLikedImport() {
     if (crawling) return;
     const tab = findLikedTab();
-    if (!tab) {
-      hidePanel();
-      panelClosed = false; // 다른 탭으로 갔다가 다시 오면 패널을 다시 보여 줌
-      return;
-    }
+    if (!tab) return;
     // 버튼을 눌러 읽는 중에 페이지가 새로 로드됐으면 이어서 읽음
     const session = readSession();
-    if (session) {
-      crawl(tab, session);
-      return;
-    }
-    if (!document.getElementById("ncl-panel")) showReady(tab);
+    if (session) crawl(tab, session);
   }
 
   async function crawl(tab, s) {
@@ -1150,13 +1157,22 @@
     stopRequested = false;
     let finished = false; // 마지막 페이지까지 갔는지
     try {
+      // 새로 시작할 때는 1쪽부터 (페이지가 새로 로드되는 목록이면 1쪽에 도착한 뒤 이어서 시작)
+      if (!s.started) {
+        importStatus = { state: "running", pages: 0, added: 0, total: 0, mode: s.mode };
+        pendingStart = s;
+        tab = await goToFirstPage(tab);
+        pendingStart = null;
+        if (!tab) throw new Error("left");
+        s.started = true;
+      }
       for (let guard = 0; guard < 2000; guard++) {
         const { scope, items } = listLinks(tab);
         s.pages++;
         s.total += items.length;
         const added = addLiked(items);
         s.added += added;
-        setPanel(`가져오는 중… ${s.pages}페이지 (새로 ${s.added}개)\n다른 화면으로 가면 멈춰요.`, [["중지", () => { stopRequested = true; }]]);
+        importStatus = { state: "running", pages: s.pages, added: s.added, total: s.total, mode: s.mode };
         // 새 좋아요만 확인: 최근 순이므로 이미 가진 글만 있는 페이지가 나오면 그 뒤도 다 가진 글
         if (s.mode === "new" && items.length && added === 0) { finished = true; break; }
         const next = findNextPage(scope, tab);
@@ -1178,25 +1194,20 @@
         await sleep(400); // 네이버 서버에 부담을 주지 않도록 잠깐 쉼
       }
       writeSession(null);
-      const summary = s.added ? `${s.pages}페이지에서 새로 ${s.added}개를 가져왔어요.` : `${s.pages}페이지를 확인했어요. 새로 가져올 글이 없어요.`;
       if (finished) {
-        if (s.mode === "full" || s.complete) writeImportState(s.cafe, { complete: true, at: Date.now() });
+        if (s.mode === "full") writeImportState(s.cafe, { complete: true, at: Date.now() });
         else readImportState((map) => { if (map[s.cafe] && map[s.cafe].complete) writeImportState(s.cafe, { complete: true, at: Date.now() }); });
-        setPanel(summary, [["닫기", () => { panelClosed = true; hidePanelNow(); }]]);
-      } else {
-        // 중지했거나 화면을 벗어남: 처음 가져오기였다면 "덜 읽음"으로 남김
-        setPanel(`${stopRequested ? "중지했어요" : "중간에 멈췄어요"}. ${summary}\n다음에 버튼을 누르면 다시 읽어요.`, [["닫기", () => { panelClosed = true; hidePanelNow(); }]]);
       }
+      // 끝까지 못 읽었으면(중지·화면 벗어남) "덜 읽음"으로 남아 다음에 다시 끝까지 읽음
+      importStatus = { state: finished ? "done" : stopRequested ? "stopped" : "interrupted", pages: s.pages, added: s.added, total: s.total, mode: s.mode };
       markList();
+    } catch (e) {
+      writeSession(null);
+      importStatus = { state: "interrupted", pages: s.pages, added: s.added, total: s.total, mode: s.mode };
     } finally {
       crawling = false;
       stopRequested = false;
     }
-  }
-
-  function hidePanelNow() {
-    const el = document.getElementById("ncl-panel");
-    if (el) el.remove();
   }
 
   // ---------- 페이지 변화 감시 ----------

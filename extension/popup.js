@@ -25,3 +25,78 @@ document.querySelectorAll('input[name="heartStyle"]').forEach((input) => {
     chrome.storage.local.set({ heartStyle: input.value });
   });
 });
+
+// ---------- 좋아요한 글 가져오기 (지금 탭의 카페 화면과 주고받음) ----------
+function ask(action, extra, cb) {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs && tabs[0];
+    if (!tab) return cb(null);
+    chrome.tabs.sendMessage(tab.id, { type: "ncl-import", action, ...extra }, (res) => {
+      void chrome.runtime.lastError; // 카페 화면이 아니면 대답이 없음
+      cb(res || null);
+    });
+  });
+}
+
+const imsg = document.getElementById("imsg");
+const ibtns = document.getElementById("ibtns");
+let poll = 0;
+
+function buttons(list) {
+  ibtns.textContent = "";
+  list.forEach(([label, fn, primary]) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (primary) b.className = "primary";
+    b.addEventListener("click", fn);
+    ibtns.appendChild(b);
+  });
+}
+
+function start(mode) {
+  ask("start", { mode }, () => refresh());
+}
+
+function updateCount() {
+  chrome.storage.local.get(["likedArticles"], (r) => {
+    document.getElementById("count").textContent = `저장된 좋아요 글: ${Object.keys(r.likedArticles || {}).length}개`;
+  });
+}
+
+function refresh() {
+  ask("status", {}, (res) => {
+    clearTimeout(poll);
+    updateCount();
+    if (!res) {
+      imsg.innerHTML = "카페의 <b>나의 활동 → 좋아요한 글</b> 화면에서 이 창을 열면 버튼이 나와요. 그 카페에서 좋아요한 글(확장 설치 전 포함)을 가져와요.";
+      buttons([]);
+      return;
+    }
+    const s = res.status || {};
+    if (res.crawling) {
+      imsg.textContent = `가져오는 중… ${s.pages}페이지 (새로 ${s.added}개)\n이 창을 닫아도 계속돼요. 카페 화면을 벗어나면 멈춰요.`;
+      buttons([["중지", () => ask("stop", {}, () => setTimeout(refresh, 300))]]);
+      poll = setTimeout(refresh, 500);
+      return;
+    }
+    let head = "";
+    if (s.state === "done") head = s.added ? `${s.pages}페이지에서 새로 ${s.added}개를 가져왔어요.\n` : `${s.pages}페이지를 확인했어요. 새로 가져올 글이 없어요.\n`;
+    else if (s.state === "stopped" || s.state === "interrupted")
+      head = `${s.state === "stopped" ? "중지했어요" : "중간에 멈췄어요"}. ${s.pages}페이지에서 새로 ${s.added}개를 가져왔어요.\n다음에 누르면 처음부터 끝까지 다시 읽어요.\n`;
+    if (!res.onLikedTab) {
+      imsg.textContent = head || "좋아요한 글 화면에서 다시 열어 주세요.";
+      buttons([]);
+      return;
+    }
+    if (res.complete) {
+      const d = new Date(res.completeAt);
+      imsg.textContent = head || `이 카페는 ${d.getMonth() + 1}월 ${d.getDate()}일에 모두 가져왔어요. 새로 생긴 좋아요만 빠르게 확인할 수 있어요.`;
+      buttons([["새 좋아요만 확인", () => start("new"), true], ["전부 다시", () => start("full")]]);
+    } else {
+      imsg.textContent = head || "이 카페에서 좋아요한 글을 모두 가져와 목록에 표시해요. 글이 많으면 시간이 조금 걸려요.";
+      buttons([["좋아요한 글 모두 가져오기", () => start("full"), true]]);
+    }
+  });
+}
+
+refresh();

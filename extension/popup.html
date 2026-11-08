@@ -14,8 +14,13 @@
   .heart.icon { padding: 0 5px; }
   #style.off { opacity: .4; pointer-events: none; }
   .count { margin-top: 10px; color: #888; font-size: 12px; }
-  .tip { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: #fff3f5; color: #6b4a52; font-size: 11.5px; line-height: 1.5; }
-  .tip b { color: #d63a5a; }
+  .imsg { margin: 0 0 8px; color: #555; font-size: 12px; line-height: 1.5; white-space: pre-line; }
+  .imsg b { color: #d63a5a; }
+  .ibtns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ibtns button { padding: 6px 10px; border: 1px solid #e3e3e8; border-radius: 6px; background: #f6f6f8; color: #333; font: bold 12px "Malgun Gothic", sans-serif; cursor: pointer; }
+  .ibtns button:hover { background: #ececf0; }
+  .ibtns button.primary { border-color: #ff4d6d; background: #ff4d6d; color: #fff; }
+  .ibtns button.primary:hover { background: #f03a5c; }
 </style>
 </head>
 <body>
@@ -31,7 +36,11 @@
   </div>
 
   <div class="count" id="count"></div>
-  <p class="tip">♥ 카페의 <b>나의 활동 → 좋아요한 글</b>을 열면 오른쪽 아래에 뜨는 <b>가져오기</b> 버튼으로, 그 카페에서 좋아요한 글을 가져올 수 있어요. (확장 설치 전 좋아요 포함)</p>
+  <div id="import">
+    <h2>좋아요한 글 가져오기</h2>
+    <p class="imsg" id="imsg">확인하는 중…</p>
+    <div class="ibtns" id="ibtns"></div>
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>
