@@ -14,8 +14,8 @@
   .heart.icon { padding: 0 5px; }
   #style.off { opacity: .4; pointer-events: none; }
   .count { margin-top: 10px; color: #888; font-size: 12px; }
-  .backup { margin-top: 10px; width: 100%; padding: 7px 0; border: 1px solid #e3e3e8; border-radius: 6px; background: #fafafa; font: 12px "Malgun Gothic", sans-serif; color: #444; cursor: pointer; }
-  .backup:hover { background: #f0f0f3; }
+  .tip { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: #fff3f5; color: #6b4a52; font-size: 11.5px; line-height: 1.5; }
+  .tip b { color: #d63a5a; }
 </style>
 </head>
 <body>
@@ -31,7 +31,7 @@
   </div>
 
   <div class="count" id="count"></div>
-  <button id="backup" class="backup">기록 백업·가져오기</button>
+  <p class="tip">♥ 카페의 <b>나의 활동 → 좋아요한 글</b>을 열면, 그 카페에서 좋아요한 글을 자동으로 가져와요. (확장 설치 전 좋아요 포함)</p>
   <script src="popup.js"></script>
 </body>
 </html>

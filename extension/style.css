@@ -71,3 +71,23 @@ tr.ncl-liked-row > td {
 .ncl-nav-heart.ncl-icon {
   padding: 0 6px;
 }
+
+/* 좋아요한 글 가져오기 진행 알림 */
+#ncl-toast {
+  position: fixed !important;
+  right: 20px;
+  bottom: 20px;
+  z-index: 2147483647;
+  max-width: 320px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #222;
+  color: #fff;
+  font: 13px/1.5 -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+#ncl-toast::before {
+  content: "\2665  ";
+  color: #ff6b85;
+}

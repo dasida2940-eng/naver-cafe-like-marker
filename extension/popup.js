@@ -25,9 +25,3 @@ document.querySelectorAll('input[name="heartStyle"]').forEach((input) => {
     chrome.storage.local.set({ heartStyle: input.value });
   });
 });
-
-// 기록 백업·가져오기 페이지 (팝업 안에서 파일을 고르면 팝업이 닫혀 버리므로 별도 탭으로 엶)
-document.getElementById("backup").addEventListener("click", () => {
-  chrome.runtime.openOptionsPage();
-  window.close();
-});

@@ -810,6 +810,241 @@
     return titleScore(a) > titleScore(prev) ? a : prev;
   }
 
+
+  // ---------- 3) 카페 "나의 활동 → 좋아요한 글" 목록에서 기록 가져오기 ----------
+  // 사용자가 좋아요한 글 탭을 열면 목록의 글을 좋아요 기록에 추가함 (추가만, 지우지는 않음)
+  // 같은 카페는 하루 한 번 페이지 버튼을 차례로 눌러 끝까지 읽고, 그 사이에는 보이는 페이지만 반영
+  const IMPORT_KEY = "likeImport";          // { 카페: 마지막으로 끝까지 읽은 시각 }
+  const CRAWL_SESSION = "ncl-like-crawl";    // 페이지가 새로 로드되는 목록에서 이어 읽기용
+  const CRAWL_INTERVAL = 24 * 60 * 60 * 1000;
+  const LIKED_TAB_TEXT = /^좋아요\s?한\s?글(\s*\(?\d[\d,]*\)?)?$/;
+  const OTHER_TAB_TEXT = /^(작성\s?글|댓글|댓글\s?단\s?글|작성\s?댓글|임시\s?저장|.{1,8})(\s*\(?\d[\d,]*\)?)?$/;
+  const NOT_LIST_SELECTOR =
+    "aside, nav, header, footer, [role='navigation'], [class*='side' i], [class*='lnb' i], [class*='gnb' i], " +
+    "[class*='popular' i], [class*='best' i], [class*='recommend' i], [class*='ranking' i], [class*='banner' i]";
+  const ACTIVE_CLASS = /(^|[-_])(on|active|selected|current|checked|is[-_]?active|is[-_]?selected)([-_]|$)/i;
+  let crawling = false;
+  let importTimer = 0;
+
+  const norm = (t) => (t || "").replace(/\s+/g, " ").trim();
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  function looksActive(el) {
+    for (let e = el, i = 0; e && i < 3; e = e.parentElement, i++) {
+      const sel = e.getAttribute("aria-selected");
+      const cur = e.getAttribute("aria-current");
+      if (sel === "true" || (cur && cur !== "false")) return true;
+      if ([...e.classList].some((c) => ACTIVE_CLASS.test(c))) return true;
+    }
+    return false;
+  }
+
+  // 같은 탭 줄의 다른 탭들과 글자 색·굵기·밑줄이 다르면 선택된 탭으로 봄
+  function differsFromSiblings(el) {
+    for (let item = el, i = 0; item && item.parentElement && i < 3; item = item.parentElement, i++) {
+      const sibs = [...item.parentElement.children].filter((c) => c !== item && norm(c.textContent).length && norm(c.textContent).length <= 14);
+      if (sibs.length < 1) continue;
+      const look = (e) => {
+        const t = e.querySelector("a, button, span, strong") || e;
+        const a = getComputedStyle(e), b = getComputedStyle(t);
+        return [a.color, a.fontWeight, a.borderBottomColor + a.borderBottomWidth, a.backgroundColor, b.color, b.fontWeight].join("|");
+      };
+      const mine = look(item);
+      const others = sibs.map(look);
+      if (others.every((o) => o === others[0]) && others[0] !== mine) return true;
+      return false;
+    }
+    return false;
+  }
+
+  // 선택된 "좋아요한 글" 탭 (없으면 null)
+  function findLikedTab() {
+    for (const el of document.querySelectorAll("a, button, [role='tab'], li, span, strong")) {
+      if (el.childElementCount > 3) continue;
+      const text = norm(el.textContent);
+      if (text.length > 14 || !LIKED_TAB_TEXT.test(text)) continue;
+      if (!el.getClientRects().length) continue;
+      // 탭 줄인지 확인: 가까운 곳에 다른 탭(작성글·댓글 등)이 있어야 함
+      const bar = el.closest("ul, ol, [role='tablist'], div");
+      if (!bar || ![...bar.querySelectorAll("a, button, [role='tab'], li")].some((o) => !o.contains(el) && !el.contains(o) && /작성|댓글/.test(norm(o.textContent)) && norm(o.textContent).length <= 14)) continue;
+      if (looksActive(el) || differsFromSiblings(el)) return el;
+    }
+    return null;
+  }
+
+  // 탭 아래 목록 영역의 글 링크 (옆 메뉴·인기글 등 제외)
+  function listLinks(tab) {
+    const ctx = pageCafe();
+    const after = (a) => tab.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING;
+    const all = [...document.querySelectorAll(ARTICLE_LINK_SELECTOR)].filter(
+      (a) => after(a) && !a.closest(NOT_LIST_SELECTOR) && !isNavButton(a) && a.getClientRects().length && resolve(a.getAttribute("href"), ctx)
+    );
+    if (!all.length) return { scope: null, items: [] };
+    // 탭을 감싼 요소 중, 그 아래 글 링크를 품은 가장 작은 영역
+    let scope = tab.parentElement;
+    while (scope && scope !== document.body && !all.some((a) => scope.contains(a))) scope = scope.parentElement;
+    const inScope = all.filter((a) => scope.contains(a));
+    const seen = new Map();
+    inScope.forEach((a) => {
+      const ids = resolve(a.getAttribute("href"), ctx);
+      const key = `${ids.c || ""}|${ids.n || ""}|${ids.a}`;
+      if (!seen.has(key)) seen.set(key, ids);
+    });
+    return { scope, items: [...seen.values()] };
+  }
+
+  // 페이지 번호 줄에서 다음 페이지 버튼
+  function findNextPage(scope, tab) {
+    if (!scope) return null;
+    const after = (e) => tab.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING;
+    const btns = [...scope.querySelectorAll("a, button")].filter((b) => after(b) && b.getClientRects().length && !b.disabled && b.getAttribute("aria-disabled") !== "true");
+    const nums = btns.filter((b) => /^\d{1,4}$/.test(norm(b.textContent)));
+    // 지금 페이지: 선택 표시가 있거나, 번호 줄에서 링크가 아닌 번호(span/strong)
+    let current = nums.find((b) => looksActive(b));
+    let curNo = current ? +norm(current.textContent) : null;
+    if (curNo == null && nums.length) {
+      const bar = nums[0].parentElement && nums[0].parentElement.closest("div, ul, nav, p") ;
+      const plain = bar && [...bar.querySelectorAll("strong, span, em")].find((e) => /^\d{1,4}$/.test(norm(e.textContent)) && !e.closest("a, button"));
+      if (plain) curNo = +norm(plain.textContent);
+      else {
+        const diff = nums.find((b) => differsFromSiblings(b));
+        if (diff) curNo = +norm(diff.textContent);
+      }
+    }
+    if (curNo == null) curNo = 1;
+    const next = nums.find((b) => +norm(b.textContent) === curNo + 1);
+    if (next) return next;
+    // 번호 묶음의 끝이면 "다음" 버튼
+    return (
+      btns.find((b) => {
+        const label = norm(b.textContent) + " " + (b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "") + " " + b.className;
+        return /(^|\s|[-_])(다음|next)($|\s|[-_]|\s?페이지)/i.test(label) && !/다음\s?글/.test(label);
+      }) || null
+    );
+  }
+
+  function addLiked(items) {
+    let added = 0;
+    items.forEach((ids) => {
+      if (isLiked(ids)) return;
+      const rec = { c: ids.c || null, n: ids.n || null, a: ids.a, t: Date.now() };
+      liked[recKey(rec)] = rec;
+      added++;
+    });
+    if (added) {
+      rebuildIndex();
+      chrome.storage.local.set({ [STORAGE_KEY]: liked });
+    }
+    return added;
+  }
+
+  function cafeKey() {
+    const ctx = pageCafe();
+    return ctx.c || ctx.n || location.pathname.split("/").slice(0, 4).join("/");
+  }
+
+  // 화면 구석 알림
+  function toast(text, done) {
+    if (window.top !== window && document.documentElement.clientWidth < 200) return;
+    let t = document.getElementById("ncl-toast");
+    if (!t) {
+      t = document.createElement("div");
+      t.id = "ncl-toast";
+      t.setAttribute("role", "status");
+      (document.body || document.documentElement).appendChild(t);
+    }
+    t.textContent = text;
+    clearTimeout(t._hide);
+    if (done) t._hide = setTimeout(() => t.remove(), 5000);
+  }
+
+  function readSession() {
+    try {
+      const s = JSON.parse(sessionStorage.getItem(CRAWL_SESSION) || "null");
+      return s && Date.now() - s.at < 2 * 60 * 1000 ? s : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function writeSession(s) {
+    try {
+      if (s) sessionStorage.setItem(CRAWL_SESSION, JSON.stringify({ ...s, at: Date.now() }));
+      else sessionStorage.removeItem(CRAWL_SESSION);
+    } catch (e) {}
+  }
+
+  // 화면이 자주 바뀌는 페이지에서도 검사는 1초에 한 번 이하로
+  let lastImportCheck = 0;
+  function scheduleImportCheck() {
+    if (crawling) return;
+    clearTimeout(importTimer);
+    const wait = Math.max(400, 1000 - (Date.now() - lastImportCheck));
+    importTimer = setTimeout(() => {
+      lastImportCheck = Date.now();
+      checkLikedImport();
+    }, wait);
+  }
+
+  function checkLikedImport() {
+    if (crawling) return;
+    const tab = findLikedTab();
+    if (!tab) return;
+    const { items } = listLinks(tab);
+    // 이어 읽는 중이면 그대로 계속 (다음 페이지 주소에 카페 정보가 빠져 있어도)
+    const session = readSession();
+    if (session) {
+      crawl(tab, session);
+      return;
+    }
+    const key = cafeKey();
+    chrome.storage.local.get([IMPORT_KEY], (r) => {
+      const last = (r[IMPORT_KEY] || {})[key] || 0;
+      if (Date.now() - last > CRAWL_INTERVAL) crawl(tab, { cafe: key, total: 0, added: 0, pages: 0 });
+      else if (items.length) addLiked(items); // 이미 오늘 끝까지 읽었으면 보이는 페이지만 조용히 반영
+    });
+  }
+
+  async function crawl(tab, s) {
+    if (crawling) return;
+    crawling = true;
+    try {
+      for (let guard = 0; guard < 300; guard++) {
+        const { scope, items } = listLinks(tab);
+        s.pages++;
+        s.total += items.length;
+        s.added += addLiked(items);
+        toast(`좋아요한 글 가져오는 중… ${s.pages}페이지 (새로 ${s.added}개)`);
+        const next = findNextPage(scope, tab);
+        if (!next) break;
+        const before = items.map((i) => i.a).join(",");
+        writeSession(s); // 페이지가 새로 로드되면 거기서 이어 읽음
+        next.click();
+        // 목록이 바뀔 때까지 기다림
+        let changed = false;
+        for (let w = 0; w < 40; w++) {
+          await sleep(200);
+          const t2 = findLikedTab();
+          if (!t2) break;
+          tab = t2;
+          const now = listLinks(tab).items.map((i) => i.a).join(",");
+          if (now && now !== before) { changed = true; break; }
+        }
+        if (!changed) break;
+        await sleep(400); // 네이버 서버에 부담을 주지 않도록 잠깐 쉼
+      }
+      writeSession(null);
+      chrome.storage.local.get([IMPORT_KEY], (r) => {
+        const map = r[IMPORT_KEY] || {};
+        map[s.cafe] = Date.now();
+        chrome.storage.local.set({ [IMPORT_KEY]: map });
+      });
+      toast(s.added ? `좋아요한 글 ${s.total}개 중 새로 ${s.added}개를 가져왔어요` : `좋아요한 글 ${s.total}개를 확인했어요 (새로 가져올 글 없음)`, true);
+      markList();
+    } finally {
+      crawling = false;
+    }
+  }
+
   // ---------- 페이지 변화 감시 ----------
   // 새 링크가 화면에 추가될 때만, 다음 화면 그리기 직전에 한 번 목록 표시
   let rafPending = false;
@@ -819,6 +1054,7 @@
     requestAnimationFrame(() => {
       rafPending = false;
       markList();
+      scheduleImportCheck();
     });
   }
 
@@ -833,8 +1069,9 @@
     for (const rec of records) {
       // 줄을 재사용하면서 링크 주소만 바꾸는 화면(페이지 이동 등)
       if (rec.type === "attributes") {
-        scheduleMark();
-        return;
+        if (rec.attributeName === "href") scheduleMark();
+        else scheduleImportCheck();
+        continue;
       }
       for (const n of rec.addedNodes) {
         if (hasLink(n)) {
@@ -847,6 +1084,7 @@
 
   load().then(() => {
     markList();
+    scheduleImportCheck();
     // 주소가 바뀌는 SPA 이동 대응
     let lastHref = location.href;
     setInterval(() => {
@@ -856,11 +1094,11 @@
       }
     }, 500);
     // 노드 추가와 링크 주소(href) 변경만 감시
-    new MutationObserver(onMutations).observe(document.documentElement, {
+    new MutationObserver(onMutations).observe(document, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["href"]
+      attributeFilter: ["href", "class", "aria-selected"]
     });
   });
 })();
