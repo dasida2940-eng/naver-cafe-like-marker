@@ -49,8 +49,11 @@ tools/          아이콘·스토어 이미지 생성 스크립트
 
 ### 스토어 업로드용 zip 만들기
 ```bash
-cd extension && zip -r ../naver-cafe-like-marker.zip . && cd ..
+python3 tools/build_store_zip.py
 ```
+`extension/` 원본은 그대로 두고, 주석만 뺀 복사본을 `naver-cafe-like-marker-store-v<버전>.zip` 으로 묶습니다.
+변수 이름 바꾸기 같은 난독화는 하지 않습니다 (Chrome 웹 스토어 정책상 난독화 금지).
+주석 제거본으로도 테스트를 돌리려면 출력 마지막 줄의 폴더를 `tests/*.py` 에 넘기면 됩니다.
 
 ### 스토어 이미지 다시 만들기
 Python Playwright가 필요합니다.
