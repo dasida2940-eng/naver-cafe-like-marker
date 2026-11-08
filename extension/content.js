@@ -449,14 +449,27 @@
       chosen = cands[0];
       attach(dot, chosen);
       resetPos(dot);
-      const lostBefore = lostWidth(title);
+      const lostBefore = lostWidth(link);
       reserve(p, target, dot, 6);
-      canReserve = lostWidth(title) <= lostBefore + 1;
+      canReserve = lostWidth(link) <= lostBefore + 1;
+      if (!canReserve && shrinkTitle(p, link)) {
+        // 사이 띄어쓰기 등으로 조금 모자라면 넘친 만큼 더 줄임
+        for (let i = 0; i < 3; i++) {
+          const over = lostWidth(link) - lostBefore;
+          if (over <= 1) break;
+          const w = parseFloat(link.style.getPropertyValue("max-width")) - Math.ceil(over) - 2;
+          if (w < 40) break;
+          link.style.setProperty("max-width", w + "px", "important");
+        }
+        canReserve = lostWidth(link) <= lostBefore + 1;
+        if (!canReserve) unshrink(p);
+        if (DEBUG) debug("제목 줄여서 아이콘·댓글 수 보이게", { ok: canReserve });
+      }
       positionDot(dot, chosen, centerY(title));
       if (!canReserve) {
         unreserve(p, dot);
         chosen = null;
-        if (DEBUG) debug("여백을 주면 제목이 잘려서 여백 안 씀", {});
+        if (DEBUG) debug("여백을 주면 다른 내용이 가려져서 여백 안 씀", {});
       } else if (!ok()) {
         // 여백 때문에 뒤의 아이콘 등이 다음 줄로 내려가 새 자리가 생겼을 수 있음 → 여백을 둔 채 아래 줄 확인
         chosen = tryOtherLines(dot, cands, row, title, ok);
@@ -558,35 +571,83 @@
     target.style.setProperty("padding-right", Math.ceil(p.padBase + offset + w + 4) + "px", "important");
   }
 
-  // 칸 밖(옆 칸)으로 넘쳐 나간 글자 폭의 합
-  // 상자 안에서 잘리거나 말줄임(…)되는 글자는 원래 그렇게 보이는 것이므로 세지 않음
-  function lostWidth(title) {
-    const cell = title.closest("td, th, li") || title.parentElement;
+  // 여백 때문에 안 보이게 된 내용의 폭 (하트 자리를 만들다 다른 것을 가리지 않았는지 확인용)
+  // - 제목 외 내용(아이콘·사진·댓글 수 등): 상자에 잘리거나 말줄임되거나 칸 밖으로 넘친 폭
+  // - 제목 글자: 칸 밖(옆 칸)으로 넘친 폭만 (상자 안에서 잘리거나 말줄임되는 건 원래 그렇게 보이는 것)
+  function lostWidth(link) {
+    const cell = link.closest("td, th, li") || link.parentElement;
     if (!cell) return 0;
     const cb = cell.getBoundingClientRect();
     const cellRight = cb.right - (parseFloat(getComputedStyle(cell).paddingRight) || 0) + 1;
     let lost = 0;
+    const measure = (node, r, isTitle) => {
+      if (r.width < 2 || r.height < 2) return;
+      let clipped = false;
+      for (let a = node.nodeType === 1 ? node : node.parentElement; a; a = a.parentElement) {
+        if (getComputedStyle(a).overflowX !== "visible") { clipped = true; break; }
+        if (a === cell) break;
+      }
+      if (isTitle) {
+        if (!clipped) lost += Math.max(0, r.right - Math.max(cellRight, r.left));
+        return;
+      }
+      const v = visibleBox(node, r);
+      const shown = v ? Math.max(0, Math.min(v.right, cellRight) - v.left) : 0;
+      lost += Math.max(0, r.width - shown);
+    };
     const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
     const range = document.createRange();
     while (walker.nextNode()) {
       const t = walker.currentNode;
-      if (!t.textContent.trim() || t.parentElement.closest(".ncl-heart-dot")) continue;
-      let clipped = false;
-      for (let a = t.parentElement; a; a = a.parentElement) {
-        if (getComputedStyle(a).overflowX !== "visible") { clipped = true; break; }
-        if (a === cell) break;
-      }
-      if (clipped) continue;
+      if (!t.textContent.trim() || t.parentElement.closest(".ncl-heart-dot, .blind")) continue;
       range.selectNodeContents(t);
-      for (const r of range.getClientRects()) {
-        if (r.width < 2 || r.height < 2) continue;
-        lost += Math.max(0, r.right - Math.max(cellRight, r.left));
-      }
+      const isTitle = link.contains(t);
+      for (const r of range.getClientRects()) measure(t, r, isTitle);
+    }
+    for (const el of cell.querySelectorAll("img, svg")) {
+      if (link.contains(el)) continue;
+      for (const r of el.getClientRects()) measure(el, r, false);
     }
     return lost;
   }
 
+  // 한 줄 고정(줄바꿈 안 됨) 줄에서 여백 때문에 뒤의 아이콘·댓글 수가 밀려나 가려지면,
+  // 제목만 말줄임(…)으로 줄여서 나머지가 보이게 함: 제목… 🖼 [3] ♥ 좋아요
+  function shrinkTitle(p, link) {
+    const box = link.parentElement;
+    if (!box) return false;
+    const lr = link.getBoundingClientRect();
+    let restRight = lr.right;
+    for (let n = link.nextSibling; n; n = n.nextSibling) {
+      if (n.nodeType === 1 && n.classList.contains("ncl-heart-dot")) continue;
+      const rects = n.nodeType === 1 ? [...n.getClientRects()] : n.nodeType === 3 && n.textContent.trim() ? (() => { const r = document.createRange(); r.selectNodeContents(n); return [...r.getClientRects()]; })() : [];
+      for (const r of rects) if (r.width && r.top < lr.bottom && r.bottom > lr.top) restRight = Math.max(restRight, r.right);
+    }
+    const cs = getComputedStyle(box);
+    const br = box.getBoundingClientRect();
+    const contentRight = br.right - (parseFloat(cs.paddingRight) || 0) - (parseFloat(cs.borderRightWidth) || 0);
+    const avail = Math.floor(contentRight - lr.left - (restRight - lr.right) - 2);
+    if (avail < 40 || avail >= lr.width) return false;
+    if (p.shrink === undefined) p.shrink = { el: link, style: link.getAttribute("style") };
+    const st = link.style;
+    st.setProperty("display", "inline-block", "important");
+    st.setProperty("max-width", avail + "px", "important");
+    st.setProperty("overflow", "hidden", "important");
+    st.setProperty("text-overflow", "ellipsis", "important");
+    st.setProperty("white-space", "nowrap", "important");
+    st.setProperty("vertical-align", "top", "important");
+    return true;
+  }
+
+  function unshrink(p) {
+    if (p.shrink === undefined) return;
+    const { el, style } = p.shrink;
+    if (style === null) el.removeAttribute("style"); else el.setAttribute("style", style);
+    p.shrink = undefined;
+  }
+
   function unreserve(p, dot) {
+    unshrink(p);
     if (p.pad === undefined) return;
     if (p.pad) p.padTarget.style.setProperty("padding-right", p.pad);
     else p.padTarget.style.removeProperty("padding-right");
@@ -632,6 +693,7 @@
     p.dot.remove();
     resizeObs.unobserve(row);
     rowOfAnchor.delete(row);
+    unshrink(p);
     if (p.pad !== undefined) {
       if (p.pad) p.padTarget.style.setProperty("padding-right", p.pad);
       else p.padTarget.style.removeProperty("padding-right");
