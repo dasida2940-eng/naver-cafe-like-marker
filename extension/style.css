@@ -72,22 +72,65 @@ tr.ncl-liked-row > td {
   padding: 0 6px;
 }
 
-/* 좋아요한 글 가져오기 진행 알림 */
-#ncl-toast {
+/* 좋아요한 글 가져오기 패널 (좋아요한 글 탭에서만 화면 오른쪽 아래) */
+#ncl-panel {
   position: fixed !important;
   right: 20px;
   bottom: 20px;
   z-index: 2147483647;
-  max-width: 320px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  background: #222;
-  color: #fff;
-  font: 13px/1.5 -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
-  pointer-events: none;
+  width: 280px;
+  box-sizing: border-box;
+  padding: 14px 16px 12px;
+  border-radius: 12px;
+  background: #fff;
+  color: #333;
+  border: 1px solid #f1d3da;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  font: 13px/1.55 -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  text-align: left;
 }
-#ncl-toast::before {
-  content: "\2665  ";
-  color: #ff6b85;
+#ncl-panel .ncl-title {
+  margin: 0 0 6px;
+  color: #e8365a;
+  font-weight: bold;
+}
+#ncl-panel .ncl-msg {
+  margin: 0 0 10px;
+  white-space: pre-line;
+}
+#ncl-panel .ncl-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+#ncl-panel button {
+  margin: 0;
+  padding: 7px 12px;
+  border: 1px solid #e3e3e8;
+  border-radius: 8px;
+  background: #f6f6f8;
+  color: #333;
+  font: bold 12px/1.2 -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  cursor: pointer;
+}
+#ncl-panel button:hover {
+  background: #ececf0;
+}
+#ncl-panel button.ncl-primary {
+  border-color: #ff4d6d;
+  background: #ff4d6d;
+  color: #fff;
+}
+#ncl-panel button.ncl-primary:hover {
+  background: #f03a5c;
+}
+#ncl-panel button.ncl-x {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  padding: 2px 6px;
+  border: 0;
+  background: none;
+  color: #999;
+  font: 18px/1 Arial, sans-serif;
 }

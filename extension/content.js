@@ -889,11 +889,11 @@
 
 
   // ---------- 3) 카페 "나의 활동 → 좋아요한 글" 목록에서 기록 가져오기 ----------
-  // 사용자가 좋아요한 글 탭을 열면 목록의 글을 좋아요 기록에 추가함 (추가만, 지우지는 않음)
-  // 같은 카페는 하루 한 번 페이지 버튼을 차례로 눌러 끝까지 읽고, 그 사이에는 보이는 페이지만 반영
-  const IMPORT_KEY = "likeImport";          // { 카페: 마지막으로 끝까지 읽은 시각 }
+  // 좋아요한 글 탭을 열면 화면 구석에 패널만 띄우고, 버튼을 눌렀을 때만 페이지를 넘기며 읽음
+  // 처음엔 끝까지("모두 가져오기"), 그다음부터는 이미 가진 글만 있는 페이지에서 멈춤("새 좋아요만 확인")
+  // 추가만 하고 기존 기록은 지우지 않음
+  const IMPORT_KEY = "likeImport";          // { 카페: { complete: 끝까지 읽었는지, at: 시각 } }
   const CRAWL_SESSION = "ncl-like-crawl";    // 페이지가 새로 로드되는 목록에서 이어 읽기용
-  const CRAWL_INTERVAL = 24 * 60 * 60 * 1000;
   const LIKED_TAB_TEXT = /^좋아요\s?한\s?글(\s*\(?\d[\d,]*\)?)?$/;
   const OTHER_TAB_TEXT = /^(작성\s?글|댓글|댓글\s?단\s?글|작성\s?댓글|임시\s?저장|.{1,8})(\s*\(?\d[\d,]*\)?)?$/;
   const NOT_LIST_SELECTOR =
@@ -1020,19 +1020,84 @@
     return ctx.c || ctx.n || location.pathname.split("/").slice(0, 4).join("/");
   }
 
-  // 화면 구석 알림
-  function toast(text, done) {
-    if (window.top !== window && document.documentElement.clientWidth < 200) return;
-    let t = document.getElementById("ncl-toast");
-    if (!t) {
-      t = document.createElement("div");
-      t.id = "ncl-toast";
-      t.setAttribute("role", "status");
-      (document.body || document.documentElement).appendChild(t);
+  // ----- 패널: 좋아요한 글 탭에서만 화면 오른쪽 아래에 뜸, 버튼을 눌러야 가져옴 -----
+  let panelClosed = false;
+  let stopRequested = false;
+
+  function panel() {
+    let el = document.getElementById("ncl-panel");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "ncl-panel";
+      el.setAttribute("role", "region");
+      el.setAttribute("aria-label", "좋아요 표시");
+      el.innerHTML =
+        '<button type="button" class="ncl-x" aria-label="닫기">×</button>' +
+        '<div class="ncl-title">♥ 좋아요 표시</div><div class="ncl-msg"></div><div class="ncl-btns"></div>';
+      el.querySelector(".ncl-x").addEventListener("click", () => {
+        if (crawling) stopRequested = true;
+        panelClosed = true;
+        el.remove();
+      });
+      (document.body || document.documentElement).appendChild(el);
     }
-    t.textContent = text;
-    clearTimeout(t._hide);
-    if (done) t._hide = setTimeout(() => t.remove(), 5000);
+    return el;
+  }
+
+  function setPanel(msg, buttons) {
+    const el = panel();
+    el.querySelector(".ncl-msg").textContent = msg;
+    const box = el.querySelector(".ncl-btns");
+    box.textContent = "";
+    (buttons || []).forEach(([label, fn, primary]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      if (primary) b.className = "ncl-primary";
+      b.addEventListener("click", fn);
+      box.appendChild(b);
+    });
+  }
+
+  function hidePanel() {
+    const el = document.getElementById("ncl-panel");
+    if (el && !crawling) el.remove();
+  }
+
+  function readImportState(cb) {
+    chrome.storage.local.get([IMPORT_KEY], (r) => cb(r[IMPORT_KEY] || {}));
+  }
+  function writeImportState(key, value) {
+    readImportState((map) => {
+      map[key] = value;
+      chrome.storage.local.set({ [IMPORT_KEY]: map });
+    });
+  }
+
+  function showReady(tab) {
+    if (panelClosed || crawling) return;
+    const key = cafeKey();
+    readImportState((map) => {
+      const st = map[key];
+      const complete = st && typeof st === "object" && st.complete;
+      if (complete) {
+        const when = new Date(st.at);
+        setPanel(`이 카페의 좋아요한 글은 ${when.getMonth() + 1}월 ${when.getDate()}일에 모두 가져왔어요.`, [
+          ["새 좋아요만 확인", () => startCrawl("new"), true],
+          ["전부 다시 가져오기", () => startCrawl("full")]
+        ]);
+      } else {
+        setPanel("이 카페에서 좋아요한 글을 가져와서 목록에 표시할 수 있어요. 글이 많으면 시간이 조금 걸려요.", [
+          ["좋아요한 글 모두 가져오기", () => startCrawl("full"), true]
+        ]);
+      }
+    });
+  }
+
+  function startCrawl(mode) {
+    const tab = findLikedTab();
+    if (!tab || crawling) return;
+    crawl(tab, { cafe: cafeKey(), mode, total: 0, added: 0, pages: 0 });
   }
 
   function readSession() {
@@ -1065,40 +1130,43 @@
   function checkLikedImport() {
     if (crawling) return;
     const tab = findLikedTab();
-    if (!tab) return;
-    const { items } = listLinks(tab);
-    // 이어 읽는 중이면 그대로 계속 (다음 페이지 주소에 카페 정보가 빠져 있어도)
+    if (!tab) {
+      hidePanel();
+      panelClosed = false; // 다른 탭으로 갔다가 다시 오면 패널을 다시 보여 줌
+      return;
+    }
+    // 버튼을 눌러 읽는 중에 페이지가 새로 로드됐으면 이어서 읽음
     const session = readSession();
     if (session) {
       crawl(tab, session);
       return;
     }
-    const key = cafeKey();
-    chrome.storage.local.get([IMPORT_KEY], (r) => {
-      const last = (r[IMPORT_KEY] || {})[key] || 0;
-      if (Date.now() - last > CRAWL_INTERVAL) crawl(tab, { cafe: key, total: 0, added: 0, pages: 0 });
-      else if (items.length) addLiked(items); // 이미 오늘 끝까지 읽었으면 보이는 페이지만 조용히 반영
-    });
+    if (!document.getElementById("ncl-panel")) showReady(tab);
   }
 
   async function crawl(tab, s) {
     if (crawling) return;
     crawling = true;
+    stopRequested = false;
+    let finished = false; // 마지막 페이지까지 갔는지
     try {
-      for (let guard = 0; guard < 300; guard++) {
+      for (let guard = 0; guard < 2000; guard++) {
         const { scope, items } = listLinks(tab);
         s.pages++;
         s.total += items.length;
-        s.added += addLiked(items);
-        toast(`좋아요한 글 가져오는 중… ${s.pages}페이지 (새로 ${s.added}개)`);
+        const added = addLiked(items);
+        s.added += added;
+        setPanel(`가져오는 중… ${s.pages}페이지 (새로 ${s.added}개)\n다른 화면으로 가면 멈춰요.`, [["중지", () => { stopRequested = true; }]]);
+        // 새 좋아요만 확인: 최근 순이므로 이미 가진 글만 있는 페이지가 나오면 그 뒤도 다 가진 글
+        if (s.mode === "new" && items.length && added === 0) { finished = true; break; }
         const next = findNextPage(scope, tab);
-        if (!next) break;
+        if (!next) { finished = true; break; }
+        if (stopRequested) break;
         const before = items.map((i) => i.a).join(",");
         writeSession(s); // 페이지가 새로 로드되면 거기서 이어 읽음
         next.click();
-        // 목록이 바뀔 때까지 기다림
         let changed = false;
-        for (let w = 0; w < 40; w++) {
+        for (let w = 0; w < 40 && !stopRequested; w++) {
           await sleep(200);
           const t2 = findLikedTab();
           if (!t2) break;
@@ -1110,16 +1178,25 @@
         await sleep(400); // 네이버 서버에 부담을 주지 않도록 잠깐 쉼
       }
       writeSession(null);
-      chrome.storage.local.get([IMPORT_KEY], (r) => {
-        const map = r[IMPORT_KEY] || {};
-        map[s.cafe] = Date.now();
-        chrome.storage.local.set({ [IMPORT_KEY]: map });
-      });
-      toast(s.added ? `좋아요한 글 ${s.total}개 중 새로 ${s.added}개를 가져왔어요` : `좋아요한 글 ${s.total}개를 확인했어요 (새로 가져올 글 없음)`, true);
+      const summary = s.added ? `${s.pages}페이지에서 새로 ${s.added}개를 가져왔어요.` : `${s.pages}페이지를 확인했어요. 새로 가져올 글이 없어요.`;
+      if (finished) {
+        if (s.mode === "full" || s.complete) writeImportState(s.cafe, { complete: true, at: Date.now() });
+        else readImportState((map) => { if (map[s.cafe] && map[s.cafe].complete) writeImportState(s.cafe, { complete: true, at: Date.now() }); });
+        setPanel(summary, [["닫기", () => { panelClosed = true; hidePanelNow(); }]]);
+      } else {
+        // 중지했거나 화면을 벗어남: 처음 가져오기였다면 "덜 읽음"으로 남김
+        setPanel(`${stopRequested ? "중지했어요" : "중간에 멈췄어요"}. ${summary}\n다음에 버튼을 누르면 다시 읽어요.`, [["닫기", () => { panelClosed = true; hidePanelNow(); }]]);
+      }
       markList();
     } finally {
       crawling = false;
+      stopRequested = false;
     }
+  }
+
+  function hidePanelNow() {
+    const el = document.getElementById("ncl-panel");
+    if (el) el.remove();
   }
 
   // ---------- 페이지 변화 감시 ----------

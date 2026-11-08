@@ -54,7 +54,8 @@ def page_a(total, per):
 <script>
 const TOTAL = {total}, PER = {per};
 let tab = 'write', page = 1;
-function ids() {{ return tab === 'like' ? Array.from({{length: TOTAL}}, (_, i) => 1000 + i) : [8001, 8002, 8003]; }}
+function ids() {{ const newer = +(localStorage.getItem('newer') || 0);
+  return tab === 'like' ? Array.from({{length: newer}}, (_, i) => 1100 + i).concat(Array.from({{length: TOTAL}}, (_, i) => 1000 + i)) : [8001, 8002, 8003]; }}
 function render() {{
   const all = ids(), pages = Math.ceil(all.length / PER);
   document.getElementById('list').innerHTML = all.slice((page - 1) * PER, page * PER).map(id =>
@@ -115,71 +116,100 @@ async def open_page(p, html_fn, path):
 
 
 stored = lambda pg: pg.evaluate("Object.values(JSON.parse(localStorage.getItem('__ncl_store')||'{}').likedArticles||{}).map(r => r.a).sort()")
+panel_text = lambda pg: pg.evaluate("(document.getElementById('ncl-panel')||{}).innerText || ''")
 
 
-async def wait_toast(pg, text, ms=30000):
+async def wait_panel(pg, text, ms=30000):
     try:
-        await pg.wait_for_function("t => { const e = document.getElementById('ncl-toast'); return e && e.textContent.includes(t); }", arg=text, timeout=ms)
-        return await pg.inner_text("#ncl-toast")
+        await pg.wait_for_function("t => { const e = document.getElementById('ncl-panel'); return e && e.innerText.includes(t); }", arg=text, timeout=ms)
     except Exception:
-        return await pg.evaluate("(document.getElementById('ncl-toast')||{}).textContent || ''")
+        pass
+    return await panel_text(pg)
 
 
 async def main():
     async with async_playwright() as p:
-        # ---- A-1: 3쪽
+        # ---- A: 한 화면 안에서 바뀌는 형태 (3쪽)
         b, pg, errors = await open_page(p, lambda u: page_a(35, 12), "/f-e/cafes/111/members/abc")
         await pg.wait_for_timeout(1500)
-        check("A: 작성글 탭에서는 아무것도 안 가져옴", await stored(pg) == [], str(await stored(pg)))
+        check("A: 작성글 탭에서는 패널도 안 뜨고 아무것도 안 가져옴", await stored(pg) == [] and await panel_text(pg) == "")
         await pg.click("text=좋아요한 글")
-        msg = await wait_toast(pg, "가져왔어요")
+        t = await wait_panel(pg, "모두 가져오기", 5000)
+        await pg.wait_for_timeout(1500)
+        check("A: 탭을 열면 버튼만 뜨고 바로 가져오지 않음", "좋아요한 글 모두 가져오기" in t and await stored(pg) == [], t.replace("\n", " / "))
+        await pg.click("#ncl-panel >> text=좋아요한 글 모두 가져오기")
+        t = await wait_panel(pg, "가져왔어요")
         got = await stored(pg)
-        check("A: 좋아요한 글 35개 모두 가져옴 (3쪽)", got == sorted(str(1000 + i) for i in range(35)), f"{len(got)}개")
+        check("A: 버튼을 누르면 35개 모두 (3쪽)", got == sorted(str(1000 + i) for i in range(35)), f"{len(got)}개 / {t}")
         check("A: 인기글·작성글은 안 가져옴", not any(x in got for x in ["9001", "9002", "8001"]))
-        check("A: 완료 알림", "35개 중 새로 35개" in msg, msg)
-        dots = await pg.evaluate("document.querySelectorAll('#list .ncl-heart-dot, #list .ncl-liked-row').length")
-        check("A: 가져온 뒤 목록에 표시", dots > 0)
-        # 같은 날 다시: 끝까지 다시 읽지 않음
+        check("A: 완료 메시지", "3페이지에서 새로 35개" in t, t.replace("\n", " / "))
+        # 새 좋아요 3개가 생긴 뒤: "새 좋아요만 확인"은 1쪽(새 글 3개)·2쪽(다 가진 글)만 읽고 멈춤
+        await pg.evaluate("localStorage.setItem('newer', '3')")
         await pg.reload()
         await pg.wait_for_timeout(800)
         await pg.click("text=좋아요한 글")
-        await pg.wait_for_timeout(2500)
-        t = await pg.evaluate("(document.getElementById('ncl-toast')||{}).textContent || ''")
-        check("A: 같은 날 다시 열면 다시 읽지 않음", t == "", t)
+        t = await wait_panel(pg, "새 좋아요만 확인", 5000)
+        check("A: 끝까지 가져온 카페는 '새 좋아요만 확인' 버튼", "새 좋아요만 확인" in t and "전부 다시 가져오기" in t, t.replace("\n", " / "))
+        await pg.click("#ncl-panel >> text=새 좋아요만 확인")
+        t = await wait_panel(pg, "가져왔어요")
+        got = await stored(pg)
+        check("A: 새 좋아요 3개만 추가하고 2쪽에서 멈춤", len(got) == 38 and "2페이지에서 새로 3개" in t, f"{len(got)}개 / {t}")
+        await pg.click("#ncl-panel >> text=닫기")
+        check("A: 닫기 누르면 패널 사라짐", await panel_text(pg) == "")
         check("A: 오류 없음", not errors, "; ".join(errors[:2]))
         await b.close()
 
-        # ---- A-2: "다음" 버튼이 있는 11쪽
+        # ---- A2: 11쪽, 중지
         b, pg, errors = await open_page(p, lambda u: page_a(55, 5), "/f-e/cafes/111/members/abc")
         await pg.wait_for_timeout(800)
         await pg.click("text=좋아요한 글")
-        msg = await wait_toast(pg, "가져왔어요", 60000)
+        await wait_panel(pg, "모두 가져오기", 5000)
+        await pg.click("#ncl-panel >> text=좋아요한 글 모두 가져오기")
+        await wait_panel(pg, "3페이지", 20000)
+        await pg.click("#ncl-panel >> text=중지")
+        t = await wait_panel(pg, "중지했어요", 10000)
+        n = len(await stored(pg))
+        check("A2: 중지 버튼으로 멈춤", "중지했어요" in t and 10 <= n < 55, f"{n}개 / {t}")
+        await pg.click("#ncl-panel >> text=닫기")
+        await pg.reload()
+        await pg.wait_for_timeout(800)
+        await pg.click("text=좋아요한 글")
+        t = await wait_panel(pg, "가져오기", 5000)
+        check("A2: 중지한 카페는 다음에 다시 '모두 가져오기'", "좋아요한 글 모두 가져오기" in t, t.replace("\n", " / "))
+        await pg.click("#ncl-panel >> text=좋아요한 글 모두 가져오기")
+        t = await wait_panel(pg, "가져왔어요", 60000)
         got = await stored(pg)
-        check("A2: 11쪽, '다음' 버튼 넘어 55개 모두", len(got) == 55, f"{len(got)}개 / {msg}")
+        check("A2: '다음' 버튼 넘어 11쪽 55개 모두", len(got) == 55, f"{len(got)}개 / {t}")
         check("A2: 오류 없음", not errors, "; ".join(errors[:2]))
         await b.close()
 
-        # ---- B: 새로 로드되는 형태
+        # ---- B: 새로 로드되는 형태 (버튼 한 번으로 끝까지 이어 읽기)
         b, pg, errors = await open_page(p, page_b, "/MyCafeMyActivity.nhn?clubid=222&tab=like")
-        msg = await wait_toast(pg, "가져왔어요", 40000)
+        await wait_panel(pg, "모두 가져오기", 8000)
+        await pg.wait_for_timeout(500)
+        check("B: 버튼 누르기 전엔 안 가져옴", await stored(pg) == [])
+        await pg.click("#ncl-panel >> text=좋아요한 글 모두 가져오기")
+        t = await wait_panel(pg, "가져왔어요", 40000)
         got = await stored(pg)
-        check("B: 새로 로드되며 3쪽 25개 모두", got == sorted(str(2000 + i) for i in range(25)), f"{len(got)}개 / {msg}")
+        check("B: 새로 로드되며 3쪽 25개 모두", got == sorted(str(2000 + i) for i in range(25)) and "3페이지에서 새로 25개" in t, f"{len(got)}개 / {t}")
         check("B: 인기글 안 가져옴", "9001" not in got)
         check("B: 오류 없음", not errors, "; ".join(errors[:2]))
         await b.close()
 
         # ---- C: 글자 색으로만 선택 표시
         b, pg, errors = await open_page(p, lambda u: PAGE_C, "/f-e/cafes/333/members/abc")
-        msg = await wait_toast(pg, "가져왔어요", 15000)
+        await wait_panel(pg, "모두 가져오기", 8000)
+        await pg.click("#ncl-panel >> text=좋아요한 글 모두 가져오기")
+        t = await wait_panel(pg, "가져왔어요", 15000)
         got = await stored(pg)
-        check("C: 색으로만 표시된 탭도 인식, 4개", got == ["3000", "3001", "3002", "3003"], f"{got} / {msg}")
+        check("C: 색으로만 표시된 탭도 인식, 4개", got == ["3000", "3001", "3002", "3003"], f"{got} / {t}")
         await b.close()
 
-        # ---- D: 선택 안 된 좋아요한 글 탭(다른 탭이 색으로 선택)
+        # ---- D: 선택 안 된 좋아요한 글 탭
         page_d = PAGE_C.replace('<button>작성글</button>', '<button class="x">작성글</button>').replace('<button class="x">좋아요한 글</button>', '<button>좋아요한 글</button>')
         b, pg, errors = await open_page(p, lambda u: page_d, "/f-e/cafes/333/members/abc")
         await pg.wait_for_timeout(2500)
-        check("D: 좋아요한 글 탭이 선택 안 됐으면 안 가져옴", await stored(pg) == [], str(await stored(pg)))
+        check("D: 좋아요한 글 탭이 선택 안 됐으면 패널도 안 뜸", await stored(pg) == [] and await panel_text(pg) == "")
         await b.close()
 
     print(f"\n{len(results)}개 중 실패 {results.count(False)}개")
