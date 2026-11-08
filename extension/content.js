@@ -422,18 +422,31 @@
     //    사진·아이콘처럼 움직이지 않는 것과 겹치면 그 바로 왼쪽으로 옮겨서 다시 확인 (글자와 겹치면 다음 칸)
     for (const c of cands) {
       attach(dot, c);
-      dot.style.removeProperty("right");
+      resetPos(dot);
       positionDot(dot, c, titleY);
       if (ok()) { chosen = c; break; }
       if (shiftLeftOfBoxes(dot, c, row) && ok()) { chosen = c; break; }
       dot.style.removeProperty("right");
     }
 
+    // 1-2) 오른쪽 끝에 자리가 없으면, 제목 줄 내용이 끝나는 곳 바로 뒤 (제목 … [2] ♥ 좋아요)
+    if (!chosen) {
+      for (const c of cands) {
+        attach(dot, c);
+        resetPos(dot);
+        positionDot(dot, c, titleY);
+        if (placeAfterContent(dot, c, row) && ok()) { chosen = c; break; }
+      }
+      if (!chosen) resetPos(dot);
+    }
+    if (DEBUG) debug("자리 정하기", { title: norm(title.textContent).slice(0, 20), step1: !!chosen && !dot.style.getPropertyValue("left") ? "오른쪽 끝" : chosen ? "내용 뒤" : "실패", obstacle: describe(findOverlap(dot, row)), separated: separated(title, dot, row) });
+
     // 2) 제목 줄에 여백을 줘서 글자를 비키게 함 (실제로 비켰는지 확인, 안 비키면 되돌림)
     const target = chosen ? null : reserveTarget(title, cands[0]);
     if (!chosen) {
       chosen = cands[0];
       attach(dot, chosen);
+      resetPos(dot);
       reserve(p, target, dot, 6);
       positionDot(dot, chosen, centerY(title));
       if (!ok()) {
@@ -451,7 +464,7 @@
           const r = c.getBoundingClientRect();
           if (y < r.top || y > r.bottom) continue;
           attach(dot, c);
-          dot.style.removeProperty("right");
+          resetPos(dot);
           positionDot(dot, c, y);
           if (ok() || (shiftLeftOfBoxes(dot, c, row) && ok())) { chosen = c; break; }
           dot.style.removeProperty("right");
@@ -464,6 +477,7 @@
     if (!chosen) {
       chosen = cands[0];
       attach(dot, chosen);
+      resetPos(dot);
       let offset = 6;
       reserve(p, target, dot, offset);
       positionDot(dot, chosen, centerY(title));
@@ -474,10 +488,20 @@
         const edge = a.right - (parseFloat(getComputedStyle(chosen).borderRightWidth) || 0);
         const next = Math.ceil(edge - ob.left + 4);
         if (next <= offset || next > a.width - dot.getBoundingClientRect().width) break;
+        const prev = offset;
         offset = next;
         reserve(p, target, dot, offset);
         positionDot(dot, chosen, centerY(title));
+        // 옮긴 자리가 글자를 덮으면 되돌림 (글자를 가리는 것보다 아이콘 옆에 붙는 편이 나음)
+        const ob2 = findOverlap(dot, row);
+        if (ob2 && ob2.text) {
+          offset = prev;
+          reserve(p, target, dot, offset);
+          positionDot(dot, chosen, centerY(title));
+          break;
+        }
       }
+      if (DEBUG) debug("마지막 단계(여백+옮기기)", { offset, obstacle: describe(findOverlap(dot, row)) });
     }
     p.anchor = chosen;
     p.w = chosen.getBoundingClientRect().width;
@@ -617,6 +641,59 @@
       if (box.right <= box.left || box.bottom <= box.top) return null;
     }
     return box;
+  }
+
+  function resetPos(dot) {
+    dot.style.removeProperty("right");
+    dot.style.removeProperty("left");
+  }
+
+  // 제목 줄에서 내용(글자·아이콘)이 끝나는 곳 바로 뒤에 하트를 놓음. 칸 안에 다 보이면 true
+  function placeAfterContent(dot, anchor, row) {
+    const d = dot.getBoundingClientRect();
+    if (!d.width) return false;
+    let end = -Infinity;
+    const band = (r) => r.width > 0 && r.height > 0 && r.bottom > d.top + 2 && r.top < d.bottom - 2;
+    for (const el of anchor.querySelectorAll("*")) {
+      if (el === dot || dot.contains(el)) continue;
+      if (el.tagName !== "IMG" && el.tagName.toLowerCase() !== "svg" && (el.firstElementChild || el.textContent.trim()) && !isPaintedIcon(el)) continue;
+      for (const r of el.getClientRects()) {
+        const v = band(r) && visibleBox(el, r);
+        if (v && v.right - v.left >= 2) end = Math.max(end, v.right);
+      }
+    }
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    while (walker.nextNode()) {
+      const t = walker.currentNode;
+      if (!t.textContent.trim() || dot.contains(t)) continue;
+      range.selectNodeContents(t);
+      for (const r of range.getClientRects()) {
+        const v = band(r) && visibleBox(t, r);
+        if (v && v.right - v.left >= 2) end = Math.max(end, v.right);
+      }
+    }
+    if (end === -Infinity) return false;
+    const a = anchor.getBoundingClientRect();
+    const left = end - a.left - (parseFloat(getComputedStyle(anchor).borderLeftWidth) || 0) + 6;
+    dot.style.setProperty("left", Math.ceil(left) + "px", "important");
+    dot.style.setProperty("right", "auto", "important");
+    const n = dot.getBoundingClientRect();
+    const v = visibleBox(dot, n);
+    const rb = row.getBoundingClientRect();
+    // 잘리지 않고 줄 안에 다 보여야 함
+    return !!v && v.right >= n.right - 1 && v.left <= n.left + 1 && n.right <= rb.right;
+  }
+
+  // 진단 모드: 개발자 도구 콘솔에서 localStorage.setItem("ncl-debug", "1") 후 새로고침
+  const DEBUG = (() => { try { return localStorage.getItem("ncl-debug") === "1"; } catch (e) { return false; } })();
+  function debug(label, info) {
+    if (DEBUG) console.log("[좋아요 표시]", label, info);
+  }
+  function describe(ob) {
+    if (!ob) return null;
+    const el = ob.el;
+    return (ob.text ? "글자 " : "상자 ") + (el ? el.tagName.toLowerCase() + (el.className && typeof el.className === "string" ? "." + el.className.trim().split(/\s+/).join(".") : "") : "") + ` (${Math.round(ob.left)}~${Math.round(ob.right)})`;
   }
 
   // 하트가 사진·아이콘(글자가 아닌 것)과 겹치면 그 바로 왼쪽으로 옮김. 옮겼으면 true
