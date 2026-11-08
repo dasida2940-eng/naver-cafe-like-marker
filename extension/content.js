@@ -450,28 +450,14 @@
       reserve(p, target, dot, 6);
       positionDot(dot, chosen, centerY(title));
       if (!ok()) {
-        unreserve(p, dot);
-        chosen = null;
+        // 여백 때문에 뒤의 아이콘 등이 다음 줄로 내려가 새 자리가 생겼을 수 있음 → 여백을 둔 채 아래 줄 확인
+        chosen = tryOtherLines(dot, cands, row, title, ok);
+        if (!chosen) unreserve(p, dot);
       }
     }
 
     // 3) 제목 줄에 자리가 없으면 같은 칸 아래쪽 줄(작성자·날짜 줄 등)의 오른쪽 빈자리 (줄 안쪽만)
-    if (!chosen) {
-      const rb = row.getBoundingClientRect();
-      for (const y of otherLines(row, title)) {
-        if (y - 9 < rb.top || y + 9 > rb.bottom) continue;
-        for (const c of cands) {
-          const r = c.getBoundingClientRect();
-          if (y < r.top || y > r.bottom) continue;
-          attach(dot, c);
-          resetPos(dot);
-          positionDot(dot, c, y);
-          if (ok() || (shiftLeftOfBoxes(dot, c, row) && ok())) { chosen = c; break; }
-          dot.style.removeProperty("right");
-        }
-        if (chosen) break;
-      }
-    }
+    if (!chosen) chosen = tryOtherLines(dot, cands, row, title, ok);
 
     // 4) 그래도 없으면 제목 줄에 여백을 주고, 비키지 않는 아이콘의 왼쪽으로 하트를 옮김
     if (!chosen) {
@@ -567,23 +553,29 @@
     return (r.top + r.bottom) / 2;
   }
 
-  // 제목 아래쪽에 있는 다른 글자 줄들의 세로 가운데 (위에서부터)
+  // 제목 아래쪽에 있는 다른 줄들의 세로 가운데 (위에서부터)
+  // 글자 줄뿐 아니라 아이콘·사진만 있는 줄도 포함 (긴 제목 때문에 아이콘이 다음 줄로 넘어간 경우)
   function otherLines(row, title) {
     const tb = title.getBoundingClientRect();
     const ys = [];
+    const add = (r) => {
+      if (r.height < 4 || r.top < tb.bottom - 1) return;
+      const y = (r.top + r.bottom) / 2;
+      if (!ys.some((v) => Math.abs(v - y) < 6)) ys.push(y);
+    };
     const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
     const range = document.createRange();
     while (walker.nextNode() && ys.length < 6) {
       const t = walker.currentNode;
-      if (!t.textContent.trim() || title.contains(t)) continue;
+      if (!t.textContent.trim() || title.contains(t) || (t.parentElement && t.parentElement.closest(".ncl-heart-dot"))) continue;
       range.selectNodeContents(t);
-      for (const r of range.getClientRects()) {
-        if (r.height < 4 || r.top < tb.bottom - 1) continue;
-        const y = (r.top + r.bottom) / 2;
-        if (!ys.some((v) => Math.abs(v - y) < 6)) ys.push(y);
-      }
+      for (const r of range.getClientRects()) add(r);
     }
-    return ys.sort((a, b) => a - b);
+    for (const el of row.querySelectorAll("img, svg, picture, video")) {
+      if (title.contains(el) || el.closest(".ncl-heart-dot")) continue;
+      for (const r of el.getClientRects()) if (r.width >= 4) add(r);
+    }
+    return ys.sort((a, b) => a - b).slice(0, 6);
   }
 
   function unplace(row) {
@@ -665,6 +657,28 @@
       if (box.right <= box.left || box.bottom <= box.top) return null;
     }
     return box;
+  }
+
+  function tryOtherLines(dot, cands, row, title, ok) {
+    const rb = row.getBoundingClientRect();
+    const half = (dot.getBoundingClientRect().height || 17) / 2;
+    for (let y of otherLines(row, title)) {
+      // 줄 끝에 붙은 줄이면 하트가 줄 밖으로 나가지 않게 안쪽으로 살짝 끌어올림
+      if (y + half > rb.bottom) y = rb.bottom - half - 1;
+      if (y - half < rb.top) continue;
+      for (const c of cands) {
+        const r = c.getBoundingClientRect();
+        if (y < r.top || y > r.bottom) continue;
+        attach(dot, c);
+        const keepRight = dot.style.getPropertyValue("right");
+        dot.style.removeProperty("left");
+        positionDot(dot, c, y);
+        if (ok() || (shiftLeftOfBoxes(dot, c, row) && ok())) return c;
+        if (keepRight) dot.style.setProperty("right", keepRight, "important");
+        else dot.style.removeProperty("right");
+      }
+    }
+    return null;
   }
 
   function resetPos(dot) {

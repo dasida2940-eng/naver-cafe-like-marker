@@ -47,7 +47,7 @@ localStorage.removeItem("ncl-debug")     // 끄기
 ## 폴더 구조
 ```
 extension/      확장 프로그램 본체 (스토어에 올릴 때 이 폴더 안의 파일을 zip으로 묶음)
-tests/          자동 테스트 (화면 구조 16종 × 환경 5종 × 설정 5종, 동작 시나리오)
+tests/          자동 테스트 (화면 구조 17종 × 환경 5종 × 설정 5종, 동작 시나리오)
 store-assets/   Chrome 웹 스토어용 스크린샷·프로모션 이미지
 docs/           개인정보처리방침 (GitHub Pages)
 tools/          아이콘·스토어 이미지 생성 스크립트
@@ -72,7 +72,7 @@ python3 shoot.py          # store-assets/ 스크린샷·프로모션 이미지 �
 ## 테스트
 Python Playwright가 필요합니다.
 ```bash
-python3 tests/harness.py extension     # 화면 구조 × 환경 × 설정 405개 조합 (겹침·잘림·칸 밀림·사진 크기 등)
+python3 tests/harness.py extension     # 화면 구조 × 환경 × 설정 430개 조합 (겹침·잘림·칸 밀림·사진 크기 등)
 python3 tests/scenarios.py extension   # 좋아요/취소, 설정 변경, 페이지 이동, 성능
 python3 tests/liked_import.py extension # 좋아요한 글 목록에서 가져오기 (한 화면형·새로고침형·색으로만 선택 표시)
 ```
