@@ -449,42 +449,42 @@
       chosen = cands[0];
       attach(dot, chosen);
       resetPos(dot);
-      const lostBefore = lostWidth(link);
-      const fits = () => lostWidth(link) <= lostBefore + 1;
-      // 제목만 말줄임(…)으로 줄여서 맞춤 (withDot: 하트가 제목 글자를 덮지 않는지도 확인)
-      const shrinkToFit = (withDot) => {
+      const titleBefore = lostWidth(link, "title"), otherBefore = lostWidth(link, "other");
+      const fits = () => lostWidth(link, "title") <= titleBefore + 1 && lostWidth(link, "other") <= otherBefore + 1;
+      const nowrap = /nowrap|pre$/.test(getComputedStyle(link).whiteSpace);
+      // 한 줄 고정 줄: 제목만 말줄임(…)으로 줄여서 뒤의 아이콘·댓글 수와 하트가 모두 보이게 함
+      //   제목… 🖼 [2] ♥ 좋아요
+      const shrinkToFit = () => {
         if (!shrinkTitle(p, link)) return false;
-        for (let i = 0; i < 4; i++) {
-          // 사이 띄어쓰기 등으로 조금 모자라면 넘친 만큼 더 줄임
-          let over = lostWidth(link) - lostBefore - 1;
-          if (withDot) {
-            positionDot(dot, chosen, centerY(title));
-            const ob = findOverlap(dot, row);
-            // 제목이나, 제목이 줄면서 앞으로 당겨진 댓글 수·new 아이콘이 하트에 닿으면 그만큼 더 줄임
-            if (ob && ob.left >= link.getBoundingClientRect().left - 1) over = Math.max(over, ob.right - dot.getBoundingClientRect().left + 4);
-          }
+        for (let i = 0; i < 5; i++) {
+          // 사이 띄어쓰기 등으로 조금 모자라면 넘친/덮인 만큼 더 줄임
+          let over = lostWidth(link, "other") - 1;
+          positionDot(dot, chosen, centerY(title));
+          const ob = findOverlap(dot, row);
+          if (ob && ob.left >= link.getBoundingClientRect().left - 1) over = Math.max(over, ob.right - dot.getBoundingClientRect().left + 4);
           if (over <= 0) break;
           const w = parseFloat(link.style.getPropertyValue("max-width")) - Math.ceil(over) - 2;
           if (w < 40) break;
           link.style.setProperty("max-width", w + "px", "important");
         }
         positionDot(dot, chosen, centerY(title));
-        const good = fits() && (!withDot || ok());
-        if (DEBUG) debug("제목 줄여서 맞추기", { withDot, ok: good });
+        const good = fits() && ok();
+        if (DEBUG) debug("제목 줄여서 맞추기", { ok: good });
         if (!good) unshrink(p);
         return good;
       };
       reserve(p, target, dot, 6);
-      canReserve = fits() || shrinkToFit(false);
       positionDot(dot, chosen, centerY(title));
-      if (!canReserve) {
-        unreserve(p, dot);
-        chosen = null;
-        if (DEBUG) debug("여백을 주면 다른 내용이 가려져서 여백 안 씀", {});
-      } else if (!ok()) {
-        // 한 줄 고정 줄에서 제목이 여백 안까지 그려지면(상자가 바깥 테두리에서 자름) 제목을 줄여서 하트 앞에서 끝나게 함
-        const nowrap = /nowrap|pre$/.test(getComputedStyle(link).whiteSpace);
-        if (!(nowrap && shrinkToFit(true))) {
+      let done = false;
+      if (nowrap && (lostWidth(link, "other") > 1 || !ok())) done = shrinkToFit();
+      if (!done) {
+        canReserve = fits();
+        positionDot(dot, chosen, centerY(title));
+        if (!canReserve) {
+          unreserve(p, dot);
+          chosen = null;
+          if (DEBUG) debug("여백을 주면 다른 내용이 가려져서 여백 안 씀", {});
+        } else if (!ok()) {
           // 여백 때문에 뒤의 아이콘 등이 다음 줄로 내려가 새 자리가 생겼을 수 있음 → 여백을 둔 채 아래 줄 확인
           chosen = tryOtherLines(dot, cands, row, title, ok);
           if (!chosen) unreserve(p, dot);
@@ -589,12 +589,12 @@
   // 여백 때문에 안 보이게 된 내용의 폭 (하트 자리를 만들다 다른 것을 가리지 않았는지 확인용)
   // - 제목 외 내용(아이콘·사진·댓글 수 등): 상자에 잘리거나 말줄임되거나 칸 밖으로 넘친 폭
   // - 제목 글자: 칸 밖(옆 칸)으로 넘친 폭만 (상자 안에서 잘리거나 말줄임되는 건 원래 그렇게 보이는 것)
-  function lostWidth(link) {
+  function lostWidth(link, part) {
     const cell = link.closest("td, th, li") || link.parentElement;
     if (!cell) return 0;
     const cb = cell.getBoundingClientRect();
     const cellRight = cb.right - (parseFloat(getComputedStyle(cell).paddingRight) || 0) + 1;
-    let lost = 0;
+    let lost = 0, lostTitle = 0;
     const measure = (node, r, isTitle) => {
       if (r.width < 2 || r.height < 2) return;
       let clipped = false;
@@ -603,7 +603,7 @@
         if (a === cell) break;
       }
       if (isTitle) {
-        if (!clipped) lost += Math.max(0, r.right - Math.max(cellRight, r.left));
+        if (!clipped) lostTitle += Math.max(0, r.right - Math.max(cellRight, r.left));
         return;
       }
       const v = visibleBox(node, r);
@@ -623,7 +623,9 @@
       if (link.contains(el)) continue;
       for (const r of el.getClientRects()) measure(el, r, false);
     }
-    return lost;
+    if (part === "title") return lostTitle;
+    if (part === "other") return lost;
+    return lost + lostTitle;
   }
 
   // 한 줄 고정(줄바꿈 안 됨) 줄에서 여백 때문에 뒤의 아이콘·댓글 수가 밀려나 가려지면,
@@ -771,15 +773,25 @@
   // 화면에서 실제로 보이는 부분 (overflow:hidden 으로 잘린 부분 제외)
   function visibleBox(el, r) {
     let box = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    // 말줄임(…)은 그 상자 안에서 바로 흘러가는 글자에만 적용됨
+    // (따로 배치된 요소 = 위치 지정·띄움·블록 안의 내용은 여백 칸에 있어도 그대로 보임)
+    let inline = true;
+    const flowCheck = (e) => {
+      if (!inline || e.nodeType !== 1) return;
+      const cs = getComputedStyle(e);
+      if (!cs.display.startsWith("inline") || cs.float !== "none" || cs.position === "absolute" || cs.position === "fixed") inline = false;
+    };
+    flowCheck(el);
     for (let p = el.parentElement; p && p !== document.documentElement; p = p.parentElement) {
       const cs = getComputedStyle(p);
-      if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
+      if (cs.overflowX === "visible" && cs.overflowY === "visible") { flowCheck(p); continue; }
       const c = p.getBoundingClientRect();
       // 말줄임(…)은 글 상자(여백 안쪽) 끝에서 잘림
-      const pr = cs.textOverflow === "ellipsis" ? parseFloat(cs.paddingRight) + parseFloat(cs.borderRightWidth) || 0 : 0;
+      const pr = inline && cs.textOverflow === "ellipsis" ? parseFloat(cs.paddingRight) + parseFloat(cs.borderRightWidth) || 0 : 0;
       if (cs.overflowX !== "visible") { box.left = Math.max(box.left, c.left); box.right = Math.min(box.right, c.right - pr); }
       if (cs.overflowY !== "visible") { box.top = Math.max(box.top, c.top); box.bottom = Math.min(box.bottom, c.bottom); }
       if (box.right <= box.left || box.bottom <= box.top) return null;
+      flowCheck(p);
     }
     return box;
   }
