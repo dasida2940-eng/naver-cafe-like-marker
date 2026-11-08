@@ -450,30 +450,45 @@
       attach(dot, chosen);
       resetPos(dot);
       const lostBefore = lostWidth(link);
-      reserve(p, target, dot, 6);
-      canReserve = lostWidth(link) <= lostBefore + 1;
-      if (!canReserve && shrinkTitle(p, link)) {
-        // 사이 띄어쓰기 등으로 조금 모자라면 넘친 만큼 더 줄임
-        for (let i = 0; i < 3; i++) {
-          const over = lostWidth(link) - lostBefore;
-          if (over <= 1) break;
+      const fits = () => lostWidth(link) <= lostBefore + 1;
+      // 제목만 말줄임(…)으로 줄여서 맞춤 (withDot: 하트가 제목 글자를 덮지 않는지도 확인)
+      const shrinkToFit = (withDot) => {
+        if (!shrinkTitle(p, link)) return false;
+        for (let i = 0; i < 4; i++) {
+          // 사이 띄어쓰기 등으로 조금 모자라면 넘친 만큼 더 줄임
+          let over = lostWidth(link) - lostBefore - 1;
+          if (withDot) {
+            positionDot(dot, chosen, centerY(title));
+            const ob = findOverlap(dot, row);
+            // 제목이나, 제목이 줄면서 앞으로 당겨진 댓글 수·new 아이콘이 하트에 닿으면 그만큼 더 줄임
+            if (ob && ob.left >= link.getBoundingClientRect().left - 1) over = Math.max(over, ob.right - dot.getBoundingClientRect().left + 4);
+          }
+          if (over <= 0) break;
           const w = parseFloat(link.style.getPropertyValue("max-width")) - Math.ceil(over) - 2;
           if (w < 40) break;
           link.style.setProperty("max-width", w + "px", "important");
         }
-        canReserve = lostWidth(link) <= lostBefore + 1;
-        if (!canReserve) unshrink(p);
-        if (DEBUG) debug("제목 줄여서 아이콘·댓글 수 보이게", { ok: canReserve });
-      }
+        positionDot(dot, chosen, centerY(title));
+        const good = fits() && (!withDot || ok());
+        if (DEBUG) debug("제목 줄여서 맞추기", { withDot, ok: good });
+        if (!good) unshrink(p);
+        return good;
+      };
+      reserve(p, target, dot, 6);
+      canReserve = fits() || shrinkToFit(false);
       positionDot(dot, chosen, centerY(title));
       if (!canReserve) {
         unreserve(p, dot);
         chosen = null;
         if (DEBUG) debug("여백을 주면 다른 내용이 가려져서 여백 안 씀", {});
       } else if (!ok()) {
-        // 여백 때문에 뒤의 아이콘 등이 다음 줄로 내려가 새 자리가 생겼을 수 있음 → 여백을 둔 채 아래 줄 확인
-        chosen = tryOtherLines(dot, cands, row, title, ok);
-        if (!chosen) unreserve(p, dot);
+        // 한 줄 고정 줄에서 제목이 여백 안까지 그려지면(상자가 바깥 테두리에서 자름) 제목을 줄여서 하트 앞에서 끝나게 함
+        const nowrap = /nowrap|pre$/.test(getComputedStyle(link).whiteSpace);
+        if (!(nowrap && shrinkToFit(true))) {
+          // 여백 때문에 뒤의 아이콘 등이 다음 줄로 내려가 새 자리가 생겼을 수 있음 → 여백을 둔 채 아래 줄 확인
+          chosen = tryOtherLines(dot, cands, row, title, ok);
+          if (!chosen) unreserve(p, dot);
+        }
       }
     }
 
