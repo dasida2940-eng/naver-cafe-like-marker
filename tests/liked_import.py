@@ -265,6 +265,47 @@ async def main():
         check("E2: 3쪽에서 눌러도 이전 버튼으로 1쪽부터 40개", len(got) == 40 and st and st["status"]["pages"] == 3, f"{len(got)}개 / {st and st['status']}")
         await b.close()
 
+        # ---- F: 까다로운 상황들 (실제 화면 형태 E 기반)
+        def page_e_with(js):
+            return lambda u: page_e(40, 15).replace("render();\n</script>", "render();\n" + js + "\n</script>")
+        # F1: 다음 페이지가 3초 늦게 뜸
+        b, pg, errors = await open_page(p, page_e_with("document.querySelector('.page_next').addEventListener('click', e => { e.stopImmediatePropagation(); page++; setTimeout(render, 3000); }, true);"), "/f-e/cafes/31580371/members/abc")
+        await pg.wait_for_timeout(1000)
+        await send(pg, "start", mode="full")
+        st = await wait_done(pg, 60000)
+        check("F1: 다음 페이지가 3초 늦게 떠도 40개 모두", len(await stored(pg)) == 40 and st and st["complete"], str(st and st["status"]))
+        await b.close()
+        # F2: 목록이 잠깐 비었다가 채워짐
+        b, pg, errors = await open_page(p, page_e_with("document.querySelector('.page_next').addEventListener('click', e => { e.stopImmediatePropagation(); page++; document.getElementById('tb').innerHTML = '<tr><td>불러오는 중…</td></tr>'; setTimeout(render, 700); }, true);"), "/f-e/cafes/31580371/members/abc")
+        await pg.wait_for_timeout(1000)
+        await send(pg, "start", mode="full")
+        st = await wait_done(pg, 40000)
+        check("F2: 목록이 비었다가 채워져도 40개 모두", len(await stored(pg)) == 40 and st and st["complete"], str(st and st["status"]))
+        await b.close()
+        # F3: 2쪽이 영영 안 뜸 → 기다리다 멈추고 '다 읽음'으로 기록하지 않음
+        b, pg, errors = await open_page(p, page_e_with("document.querySelector('.page_next').addEventListener('click', e => { e.stopImmediatePropagation(); }, true);"), "/f-e/cafes/31580371/members/abc")
+        await pg.wait_for_timeout(1000)
+        await send(pg, "start", mode="full")
+        st = await wait_done(pg, 30000)
+        check("F3: 다음 페이지가 안 뜨면 멈추고 '다 읽음' 아님", st and st["status"]["state"] == "interrupted" and not st["complete"] and len(await stored(pg)) == 15, str(st and st["status"]))
+        await b.close()
+        # F5: 목록이 아직 안 뜬 상태(0개)에서 누르면 '다 읽음'으로 기록하지 않음
+        b, pg, errors = await open_page(p, lambda u: page_e(40, 15).replace("render();\n</script>", "document.querySelector('.page_next').disabled = true;\n</script>"), "/f-e/cafes/31580371/members/abc")
+        await pg.wait_for_timeout(1000)
+        await send(pg, "start", mode="full")
+        st = await wait_done(pg, 15000)
+        check("F5: 글 0개면 '다 읽음' 아님 (empty)", st and st["status"]["state"] == "empty" and not st["complete"], str(st and st["status"]))
+        await b.close()
+        # F4: 가져오는 중에 버튼을 또 누름 → 한 번만 실행
+        b, pg, errors = await open_page(p, lambda u: page_e(40, 15), "/f-e/cafes/31580371/members/abc")
+        await pg.wait_for_timeout(1000)
+        r1 = await send(pg, "start", mode="full")
+        r2 = await send(pg, "start", mode="full")
+        st = await wait_done(pg, 40000)
+        check("F4: 중복으로 눌러도 한 번만 (두 번째는 거절)", r1 and r1["ok"] and r2 and not r2["ok"] and st["status"]["pages"] == 3 and len(await stored(pg)) == 40, f"{r1} {r2} {st['status']}")
+        check("F: 오류 없음", not errors, "; ".join(errors[:2]))
+        await b.close()
+
         # ---- C: 글자 색으로만 선택 표시
         b, pg, errors = await open_page(p, lambda u: PAGE_C, "/f-e/cafes/333/members/abc")
         await pg.wait_for_timeout(1200)

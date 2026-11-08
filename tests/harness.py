@@ -233,10 +233,13 @@ async def run_one(browser, page_path, env, cfg):
     await pg.evaluate(f"__initLiked({json.dumps(liked)})")
     if "p10" in page_path.name:
         await pg.wait_for_timeout(600)  # 탭이 열린 뒤를 기준으로
+    if "p16" in page_path.name:
+        await pg.wait_for_timeout(1200)  # 아이콘 CSS가 적용된 뒤를 기준으로 (확장은 그 전에 넣고 싶지만, 비교 기준은 최종 화면)
     before = await pg.evaluate(SNAP)
     await pg.add_style_tag(path=str(EXT / "style.css"))
     await pg.add_script_tag(path=str(EXT / "content.js"))
-    await pg.wait_for_timeout(250)
+    # p16: 아이콘 CSS가 늦게 적용됨 → 다시 확인까지 기다림
+    await pg.wait_for_timeout(3000 if "p16" in page_path.name else 250)
     if "p10" in page_path.name:
         # 숨겨진 상태에서 확장이 먼저 돌고, 나중에 탭이 열리는 경우
         pass

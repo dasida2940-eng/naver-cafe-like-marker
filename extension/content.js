@@ -505,9 +505,31 @@
     }
     p.anchor = chosen;
     p.w = chosen.getBoundingClientRect().width;
+    const rb = row.getBoundingClientRect();
+    p.rw = rb.width;
+    p.rh = rb.height;
     placed.set(row, p);
     rowOfAnchor.set(chosen, row);
+    rowOfAnchor.set(row, row);
     resizeObs.observe(chosen);
+    resizeObs.observe(row);
+    // 자리를 정한 뒤 아이콘·글꼴이 늦게 적용돼 줄바꿈이 바뀌는 경우를 대비해 조금 뒤에 다시 확인
+    [600, 2000].forEach((ms) => setTimeout(() => recheck(row, p), ms));
+  }
+
+  // 자리를 정한 뒤 글자와 겹치게 됐으면 다시 자리를 잡음 (한 줄당 최대 3번)
+  const recheckCount = new WeakMap();
+  function recheck(row, p) {
+    if (placed.get(row) !== p || !p.dot.isConnected) return;
+    const n = recheckCount.get(row) || 0;
+    if (n >= 3) return;
+    const rb = row.getBoundingClientRect();
+    const d = p.dot.getBoundingClientRect();
+    const outside = d.top < rb.top - 1 || d.bottom > rb.bottom + 1;
+    if (outside || overlaps(p.dot, row) || separated(titleTextOf(p.title), p.dot, row)) {
+      recheckCount.set(row, n + 1);
+      replace(row);
+    }
   }
 
 
@@ -568,6 +590,8 @@
     const p = placed.get(row);
     if (!p) return;
     p.dot.remove();
+    resizeObs.unobserve(row);
+    rowOfAnchor.delete(row);
     if (p.pad !== undefined) {
       if (p.pad) p.padTarget.style.setProperty("padding-right", p.pad);
       else p.padTarget.style.removeProperty("padding-right");
@@ -826,14 +850,19 @@
   }
 
   // 폭이 바뀌면(창 크기, 확대, 숨겨졌던 탭이 열림, 사이드바 접힘 등) 하트 자리를 다시 계산
+  // 폭이 바뀌거나 줄 높이(줄바꿈)가 바뀌면 다시 계산 (늦게 그려지는 아이콘·글꼴 등)
   const resizeObs = new ResizeObserver((entries) => {
+    const rows = new Set();
     for (const e of entries) {
       const row = rowOfAnchor.get(e.target);
       const p = row && placed.get(row);
       if (!p) continue;
-      const w = e.target.getBoundingClientRect().width;
-      if (Math.abs(w - p.w) > 1) replace(row);
+      const r = e.target.getBoundingClientRect();
+      if (e.target === row) {
+        if (Math.abs(r.width - p.rw) > 1 || Math.abs(r.height - p.rh) > 1) rows.add(row);
+      } else if (Math.abs(r.width - p.w) > 1) rows.add(row);
     }
+    rows.forEach(replace);
   });
 
   function replaceAll() {
@@ -1220,12 +1249,14 @@
         await sleep(400); // 네이버 서버에 부담을 주지 않도록 잠깐 쉼
       }
       writeSession(null);
+      // 목록에서 글을 하나도 못 찾았으면(아직 안 떴거나 화면이 다름) "다 읽음"으로 기록하지 않음
+      if (finished && s.total === 0) finished = false;
       if (finished) {
         if (s.mode === "full") writeImportState(s.cafe, { complete: true, at: Date.now() });
         else readImportState((map) => { if (map[s.cafe] && map[s.cafe].complete) writeImportState(s.cafe, { complete: true, at: Date.now() }); });
       }
       // 끝까지 못 읽었으면(중지·화면 벗어남) "덜 읽음"으로 남아 다음에 다시 끝까지 읽음
-      importStatus = { state: finished ? "done" : stopRequested ? "stopped" : "interrupted", pages: s.pages, added: s.added, total: s.total, mode: s.mode };
+      importStatus = { state: finished ? "done" : stopRequested ? "stopped" : s.total === 0 ? "empty" : "interrupted", pages: s.pages, added: s.added, total: s.total, mode: s.mode };
       markList();
     } catch (e) {
       writeSession(null);

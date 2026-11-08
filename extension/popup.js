@@ -63,10 +63,21 @@ function updateCount() {
   });
 }
 
+let wasCrawling = false;
+let missed = 0;
 function refresh() {
   ask("status", {}, (res) => {
     clearTimeout(poll);
     updateCount();
+    // 가져오는 중에 페이지가 새로 로드되면 잠깐 대답이 없음 → 조금 기다렸다가 다시 물어봄
+    if (!res && wasCrawling && missed < 20) {
+      missed++;
+      imsg.textContent = "다음 페이지를 불러오는 중…";
+      poll = setTimeout(refresh, 500);
+      return;
+    }
+    missed = 0;
+    wasCrawling = !!(res && res.crawling);
     if (!res) {
       imsg.innerHTML = "카페의 <b>나의 활동 → 좋아요한 글</b> 화면에서 이 창을 열면 버튼이 나와요. 그 카페에서 좋아요한 글(확장 설치 전 포함)을 가져와요.";
       buttons([]);
@@ -82,6 +93,7 @@ function refresh() {
     }
     let head = "";
     if (s.state === "done") head = s.added ? `${s.pages}페이지에서 새로 ${s.added}개를 가져왔어요.\n` : `${s.pages}페이지를 확인했어요. 새로 가져올 글이 없어요.\n`;
+    else if (s.state === "empty") head = "목록에서 글을 찾지 못했어요. 목록이 다 뜬 뒤에 다시 눌러 주세요.\n";
     else if (s.state === "stopped" || s.state === "interrupted")
       head = `${s.state === "stopped" ? "중지했어요" : "중간에 멈췄어요"}. ${s.pages}페이지에서 새로 ${s.added}개를 가져왔어요.\n다음에 누르면 처음부터 끝까지 다시 읽어요.\n`;
     if (!res.onLikedTab) {
