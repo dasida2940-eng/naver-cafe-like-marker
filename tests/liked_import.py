@@ -142,6 +142,8 @@ async def open_page(p, html_fn, path):
     return b, pg, errors
 
 
+# 저장된 좋아요를 최근에 누른 순(시각 큰 순)으로 정렬한 글 번호
+by_time = lambda pg: pg.evaluate("Object.values(JSON.parse(localStorage.getItem('__ncl_store')||'{}').likedArticles||{}).sort((x, y) => y.t - x.t).map(r => r.a)")
 stored = lambda pg: pg.evaluate("Object.values(JSON.parse(localStorage.getItem('__ncl_store')||'{}').likedArticles||{}).map(r => r.a).sort()")
 
 
@@ -183,6 +185,8 @@ async def main():
         check("A: 버튼을 누르면 35개 모두 (3쪽)", got == sorted(str(1000 + i) for i in range(35)) and st["status"]["pages"] == 3, f"{len(got)}개 / {st['status']}")
         check("A: 인기글·작성글은 안 가져옴", not any(x in got for x in ["9001", "9002", "8001"]))
         check("A: 끝까지 읽음으로 기록", st["complete"])
+        order = await by_time(pg)
+        check("A: 목록 맨 위 글이 가장 최근 좋아요 (목록 순서대로 시각)", order == [str(1000 + i) for i in range(35)], str(order[:5]))
         await pg.evaluate("localStorage.setItem('newer', '3')")
         await pg.reload()
         await pg.wait_for_timeout(800)
@@ -194,6 +198,15 @@ async def main():
         st = await wait_done(pg)
         got = await stored(pg)
         check("A: 새 좋아요 3개만 추가하고 2쪽에서 멈춤", len(got) == 38 and st["status"]["pages"] == 2 and st["status"]["added"] == 3, f"{len(got)}개 / {st['status']}")
+        order = await by_time(pg)
+        check("A: 새로 가져온 3개가 가장 최근, 그 뒤는 그대로", order == ["1100", "1101", "1102"] + [str(1000 + i) for i in range(35)], str(order[:6]))
+        # 예전 버전처럼 시각이 뒤집혀 저장돼 있어도 '전부 다시'를 하면 목록 순서로 바로잡힘
+        await pg.evaluate("""(() => { const d = JSON.parse(localStorage.getItem('__ncl_store')); const L = d.likedArticles;
+          Object.values(L).forEach(r => { r.t = 1000000 + +r.a; }); chrome.storage.local.set({ likedArticles: L }); })()""")
+        await send(pg, "start", mode="full")
+        st = await wait_done(pg)
+        order = await by_time(pg)
+        check("A: '전부 다시'로 뒤집힌 시각을 목록 순서로 고침", order == ["1100", "1101", "1102"] + [str(1000 + i) for i in range(35)], str(order[:6]))
         check("A: 오류 없음", not errors, "; ".join(errors[:2]))
         await b.close()
 

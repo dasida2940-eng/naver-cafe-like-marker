@@ -1265,15 +1265,25 @@
     );
   }
 
-  function addLiked(items) {
-    let added = 0;
-    items.forEach((ids) => {
-      if (isLiked(ids)) return;
-      const rec = { c: ids.c || null, n: ids.n || null, a: ids.a, t: Date.now() };
+  // 좋아요한 글 목록은 맨 위가 가장 최근에 누른 좋아요 → 목록 순서대로 시각을 매김
+  // (가져온 순서대로 지금 시각을 쓰면 뒤 페이지의 오래된 좋아요가 최신으로 뒤바뀜)
+  // base: 가져오기를 시작한 시각, pos: 목록 전체에서 이 페이지 첫 글의 순번
+  // reorder: 전부 가져오기 때는 이미 있던 기록의 시각도 목록 순서에 맞게 고침
+  function addLiked(items, base, pos, reorder) {
+    let added = 0, changed = 0;
+    items.forEach((ids, i) => {
+      const t = base - (pos + i);
+      if (isLiked(ids)) {
+        if (!reorder) return;
+        const rec = index.get(ids.a).find((r) => same(r, ids));
+        if (rec && rec.t !== t) { rec.t = t; changed++; }
+        return;
+      }
+      const rec = { c: ids.c || null, n: ids.n || null, a: ids.a, t };
       liked[recKey(rec)] = rec;
       added++;
     });
-    if (added) {
+    if (added || changed) {
       rebuildIndex();
       chrome.storage.local.set({ [STORAGE_KEY]: liked });
     }
@@ -1303,7 +1313,7 @@
   function startCrawl(mode) {
     const tab = findLikedTab();
     if (!enabled || !tab || crawling || jumping) return false;
-    crawl(tab, { cafe: cafeKey(), mode, total: 0, added: 0, pages: 0, started: false });
+    crawl(tab, { cafe: cafeKey(), mode, total: 0, added: 0, pages: 0, started: false, base: Date.now() });
     return true;
   }
 
@@ -1397,8 +1407,8 @@
       for (let guard = 0; guard < 2000; guard++) {
         const { scope, items } = listLinks(tab);
         s.pages++;
+        const added = addLiked(items, s.base || Date.now(), s.total, s.mode === "full");
         s.total += items.length;
-        const added = addLiked(items);
         s.added += added;
         const info = pagerInfo(scope, tab);
         importStatus = { state: "running", pages: s.pages, added: s.added, total: s.total, mode: s.mode, totalPages: info.total };
