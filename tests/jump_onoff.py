@@ -20,13 +20,18 @@ def check(name, ok, detail=""):
 
 
 TOTAL, PER = 250, 10
+NOTICES = 2
 IDS = [9000 - 2 * i for i in range(TOTAL)]          # 9000, 8998, … (이 게시판)
-PAGES = (TOTAL + PER - 1) // PER
 CSS = """body{font:13px sans-serif;margin:0;padding:16px} table{width:700px;border-collapse:collapse} td{padding:6px;border-bottom:1px solid #eee}
 .pagination{display:flex;gap:6px;margin-top:10px} .pagination a,.pagination button,.pagination strong{padding:2px 6px}"""
-NOTICE = """<table class="notice"><tbody>
-<tr><td><a class="article" href="https://cafe.naver.com/f-e/cafes/111/articles/12">[공지] 카페 규칙</a></td><td>매니저</td></tr>
-<tr><td><a class="article" href="https://cafe.naver.com/f-e/cafes/111/articles/30">[공지] 등업 안내</a></td><td>매니저</td></tr></tbody></table>"""
+def notice_html():
+    # 네이버처럼 공지는 목록 위 별도 표 (#upperArticleList)
+    rows_ = "".join(f'<tr><td><a class="article" href="https://cafe.naver.com/f-e/cafes/111/articles/{12 + 7 * i}">[공지] 안내 {i}</a></td><td>매니저</td></tr>' for i in range(NOTICES))
+    return f'<div class="article-board" id="upperArticleList"><table><tbody>{rows_}</tbody></table></div>'
+
+
+def pages_count():
+    return (TOTAL + PER - 1) // PER
 
 
 def rows(page):
@@ -39,9 +44,9 @@ def pager_html(page, link):
     group = (page - 1) // 10 * 10
     el = (lambda p, t, c="": f'<a class="{c}" href="?page={p}">{t}</a>') if link else (lambda p, t, c="": f'<button class="{c}" data-p="{p}">{t}</button>')
     h = el(group, "이전", "btn_prev") if group > 0 else ""
-    for p in range(group + 1, min(group + 10, PAGES) + 1):
+    for p in range(group + 1, min(group + 10, pages_count()) + 1):
         h += f'<strong class="on">{p}</strong>' if p == page else el(p, str(p))
-    if group + 10 < PAGES:
+    if group + 10 < pages_count():
         h += el(group + 11, "다음", "btn_next")
     return h
 
@@ -49,10 +54,10 @@ def pager_html(page, link):
 def page_s(url):
     q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
     start = int(q.get("page", ["1"])[0])
-    data = json.dumps({str(p): rows(p) for p in range(1, PAGES + 1)})
-    pagers = json.dumps({str(p): pager_html(p, False) for p in range(1, PAGES + 1)})
+    data = json.dumps({str(p): rows(p) for p in range(1, pages_count() + 1)})
+    pagers = json.dumps({str(p): pager_html(p, False) for p in range(1, pages_count() + 1)})
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>{CSS}</style></head><body>
-<h3>자유게시판</h3>{NOTICE}<table class="board"><tbody id="tb"></tbody></table><div class="pagination" id="pager"></div>
+<h3>자유게시판</h3>{notice_html()}<table class="board"><tbody id="tb"></tbody></table><div class="pagination" id="pager"></div>
 <script>
 const ROWS = {data}, PAGERS = {pagers};
 let page = {start};
@@ -66,7 +71,7 @@ def page_r(url):
     q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
     page = int(q.get("page", ["1"])[0])
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>{CSS}</style></head><body>
-<h3>자유게시판</h3>{NOTICE}<table class="board"><tbody>{rows(page)}</tbody></table><div class="pagination">{pager_html(page, True)}</div></body></html>"""
+<h3>자유게시판</h3>{notice_html()}<table class="board"><tbody>{rows(page)}</tbody></table><div class="pagination">{pager_html(page, True)}</div></body></html>"""
 
 
 def page_article(url):
@@ -131,7 +136,7 @@ async def flashed(pg):
 
 async def main():
     async with async_playwright() as p:
-        page_of = lambda a: IDS.index(a) // PER + 1
+        page_of = lambda a: IDS.index(a) // PER + 1  # PER는 실행 시점 값
         for kind, fn in (("S", page_s), ("R", page_r)):
             # 1) 가장 최근 좋아요가 이 게시판 글 → 그 페이지로
             b, pg, err = await open_page(p, fn, "/f-e/cafes/111/menus/1", likes=[(8900, 300), (8500, 200), (8100, 100)])
@@ -177,6 +182,18 @@ async def main():
         st = await send(pg, "ncl-jump", "status")
         check("4c 좋아요한 글 탭 화면에서는 이동 버튼 안 나옴", st is None, str(st))
         await b.close()
+
+        # 4d) 한 페이지에 5개씩 보기 + 공지 7개 (공지 표가 게시글 표보다 큼)
+        global PER, NOTICES
+        PER, NOTICES = 5, 7
+        for kind, fn in (("S", page_s), ("R", page_r)):
+            b, pg, err = await open_page(p, fn, "/f-e/cafes/111/menus/1", likes=[(8900, 300), (8500, 200)])
+            st = await jump(pg)
+            cp = await current_page(pg)
+            check(f"4d-{kind} 5개씩 보기 + 공지 7개에서도 그 페이지에 멈춤", st.get("state") == "done" and cp == page_of(8900), f"{st} 지금 {cp}쪽, 기대 {page_of(8900)}쪽")
+            check(f"4d-{kind} 그 줄 강조", (await flashed(pg)) == "글 8900", str(await flashed(pg)))
+            await b.close()
+        PER, NOTICES = 10, 2
 
         # 5) 이 카페 좋아요 없음 / 이 게시판에 없음
         b, pg, err = await open_page(p, page_s, "/f-e/cafes/111/menus/1", likes=[])

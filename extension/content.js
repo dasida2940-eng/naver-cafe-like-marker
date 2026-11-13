@@ -1456,12 +1456,18 @@
   let jumpStatus = readJumpResult() || { state: "idle" };
   const DOC_START = () => document.head || document.documentElement; // 목록 함수에 "문서 전체"를 넘길 때
 
-  // 게시판 목록: 글 링크가 가장 많이 모인 목록(표·목록) 하나와 그 안의 글 (화면 순서)
+  // 위에 고정된 공지 영역 (페이지를 넘겨도 그대로라 목록으로 쓰면 안 됨)
+  const NOTICE_SELECTOR = "#upperArticleList, [class*='notice' i], [class*='type_up' i], [class*='type_main' i], [class*='type_required' i]";
+
+  // 게시판 목록: 공지를 뺀 글 링크 묶음(표·목록) 중 페이지 번호 바로 위의 것 (없으면 가장 큰 것), 화면 순서
+  // (한 페이지에 5개씩 보기 등으로 글이 공지보다 적어도 공지 표를 목록으로 착각하지 않도록)
   function boardList() {
     const ctx = pageCafe();
     const groups = new Map();
     for (const a of document.querySelectorAll(ARTICLE_LINK_SELECTOR)) {
       if (a.closest(NOT_LIST_SELECTOR) || a.closest(ARTICLE_BODY_SELECTOR) || isNavButton(a) || !a.getClientRects().length) continue;
+      const notice = a.closest(NOTICE_SELECTOR);
+      if (notice && !notice.querySelector(PAGER_HINT)) continue; // 페이지 번호까지 품은 큰 영역이면 공지 영역이 아님
       const ids = resolve(a.getAttribute("href"), ctx);
       if (!ids || !ids.a) continue;
       const box = a.closest("tbody, ul, ol") || (a.parentElement && a.parentElement.parentElement);
@@ -1475,6 +1481,16 @@
     groups.forEach((g, box) => {
       if (!best || g.size > best.items.length) best = { scope: box, items: [...g.values()] };
     });
+    // 페이지 번호 줄이 있으면 그 바로 위(앞)에 있는 묶음을 목록으로
+    const pager = [...document.querySelectorAll(PAGER_HINT)].find((e) => !e.closest(NOT_LIST_SELECTOR) && e.getClientRects().length);
+    if (pager) {
+      let near = null;
+      groups.forEach((g, box) => {
+        if (g.size < 2 || !(box.compareDocumentPosition(pager) & Node.DOCUMENT_POSITION_FOLLOWING)) return;
+        if (!near || near.scope.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING) near = { scope: box, items: [...g.values()] };
+      });
+      if (near) best = near;
+    }
     return best || { scope: null, items: [] };
   }
 
