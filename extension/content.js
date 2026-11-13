@@ -9,11 +9,13 @@
   const MAP_KEY = "cafeMap";           // { 카페번호: 카페이름 }  (서로 모를 때 채워 넣기용)
   const MODE_KEY = "displayMode";      // "bg" | "bg_heart" | "heart"
   const STYLE_KEY = "heartStyle";      // "text"(♥ 좋아요) | "icon"(♥)
+  const ENABLED_KEY = "enabled";       // false면 확장 전체가 꺼짐 (표시·기록·가져오기·이동 모두 안 함)
 
   let liked = {};
   let cafeMap = {};
   let mode = "bg";
   let heartStyle = "text";
+  let enabled = true;
   let index = new Map(); // 글번호 → [기록...]  (빠른 조회용)
 
   // 카페 이름으로 오인하면 안 되는 주소 첫 부분
@@ -176,7 +178,8 @@
 
   function load() {
     return new Promise((done) => {
-      chrome.storage.local.get([STORAGE_KEY, MAP_KEY, MODE_KEY, STYLE_KEY], (r) => {
+      chrome.storage.local.get([STORAGE_KEY, MAP_KEY, MODE_KEY, STYLE_KEY, ENABLED_KEY], (r) => {
+        enabled = r[ENABLED_KEY] !== false;
         cafeMap = r[MAP_KEY] || {};
         mode = r[MODE_KEY] || "bg";
         heartStyle = r[STYLE_KEY] || "text";
@@ -221,6 +224,11 @@
       ctxCache = null;
     }
     if (changes[MODE_KEY]) mode = changes[MODE_KEY].newValue || "bg";
+    if (changes[ENABLED_KEY]) {
+      enabled = changes[ENABLED_KEY].newValue !== false;
+      // 끄면 하던 가져오기·이동도 멈춤 (표시는 아래 markList에서 모두 지워짐)
+      if (!enabled) { stopRequested = true; jumpStop = true; }
+    }
     if (changes[STYLE_KEY]) {
       heartStyle = changes[STYLE_KEY].newValue || "text";
       // 모양이 바뀌면 크기도 달라지므로 하트를 지우고 다시 그림 (여백도 다시 계산됨)
@@ -259,6 +267,7 @@
   document.addEventListener(
     "click",
     (e) => {
+      if (!enabled) return; // 꺼져 있으면 기록하지 않음
       const btn = e.target.closest && e.target.closest(LIKE_BTN_SELECTOR);
       if (!btn) return;
       const ids = currentArticle();
@@ -312,7 +321,8 @@
     const current = currentArticle();
     const likedRows = new Map(); // 줄 → 그 줄의 제목 링크
 
-    document.querySelectorAll(ARTICLE_LINK_SELECTOR).forEach((a) => {
+    // 꺼져 있으면 아무 줄도 고르지 않음 → 아래에서 기존 표시가 모두 지워짐
+    if (enabled) document.querySelectorAll(ARTICLE_LINK_SELECTOR).forEach((a) => {
       const ids = resolve(a.getAttribute("href"), ctx);
       if (!ids || !isLiked(ids)) return;
       if (a.closest(ARTICLE_BODY_SELECTOR)) return;
@@ -1169,7 +1179,7 @@
 
   // 페이지 이동 영역: 목록 근처에 없으면 바깥쪽으로 넓혀 가며 찾음 (목록과 떨어져 있는 경우)
   const PAGER_HINT =
-    "[class*='paginat' i], [class*='paging' i], [class*='page_next' i], [class*='page-next' i], [class*='btn_next' i], [class*='pager' i], [aria-label*='페이지']";
+    "[class*='paginat' i], [class*='paging' i], [class*='page_next' i], [class*='page-next' i], [class*='btn_next' i], [class*='pager' i], [aria-label*='페이지'], .prev-next";
   function pagerRoot(scope) {
     let r = scope;
     for (let i = 0; i < 6 && r && r !== document.documentElement; i++) {
@@ -1292,7 +1302,7 @@
 
   function startCrawl(mode) {
     const tab = findLikedTab();
-    if (!tab || crawling) return false;
+    if (!enabled || !tab || crawling || jumping) return false;
     crawl(tab, { cafe: cafeKey(), mode, total: 0, added: 0, pages: 0, started: false });
     return true;
   }
@@ -1361,7 +1371,7 @@
   }
 
   function checkLikedImport() {
-    if (crawling) return;
+    if (crawling || !enabled) return;
     const tab = findLikedTab();
     if (!tab) return;
     // 버튼을 눌러 읽는 중에 페이지가 새로 로드됐으면 이어서 읽음
@@ -1435,6 +1445,226 @@
     }
   }
 
+  // ---------- 게시판에서 가장 최근에 좋아요한 글이 있는 페이지로 이동 ----------
+  // 1쪽부터 다음 페이지로 넘기며 찾음. 목록은 최신 글(큰 글번호)이 위에 오므로,
+  // 목록이 어떤 글의 번호보다 아래로 내려갔는데 그 글이 안 나왔으면 이 게시판 글이 아님 → 그다음 최근 좋아요로 넘어감
+  const JUMP_SESSION = "ncl-jump";         // 페이지가 새로 로드돼도 이어서 찾기
+  const JUMP_RESULT = "ncl-jump-result";   // 마지막 결과 (팝업 표시용)
+  const JUMP_MAX_PAGES = 300;
+  let jumping = false;
+  let jumpStop = false;
+  let jumpStatus = readJumpResult() || { state: "idle" };
+  const DOC_START = () => document.head || document.documentElement; // 목록 함수에 "문서 전체"를 넘길 때
+
+  // 게시판 목록: 글 링크가 가장 많이 모인 목록(표·목록) 하나와 그 안의 글 (화면 순서)
+  function boardList() {
+    const ctx = pageCafe();
+    const groups = new Map();
+    for (const a of document.querySelectorAll(ARTICLE_LINK_SELECTOR)) {
+      if (a.closest(NOT_LIST_SELECTOR) || a.closest(ARTICLE_BODY_SELECTOR) || isNavButton(a) || !a.getClientRects().length) continue;
+      const ids = resolve(a.getAttribute("href"), ctx);
+      if (!ids || !ids.a) continue;
+      const box = a.closest("tbody, ul, ol") || (a.parentElement && a.parentElement.parentElement);
+      if (!box) continue;
+      if (!groups.has(box)) groups.set(box, new Map());
+      const g = groups.get(box);
+      const key = `${ids.c || ""}|${ids.n || ""}|${ids.a}`;
+      if (!g.has(key)) g.set(key, ids);
+    }
+    let best = null;
+    groups.forEach((g, box) => {
+      if (!best || g.size > best.items.length) best = { scope: box, items: [...g.values()] };
+    });
+    return best || { scope: null, items: [] };
+  }
+
+  // 페이지 번호 줄이 있는 게시판 목록 화면인지 (좋아요한 글 탭 화면은 제외)
+  function isBoardPage() {
+    if (findLikedTab()) return false;
+    const { scope, items } = boardList();
+    if (!scope || items.length < 3) return false;
+    const info = pagerInfo(scope, DOC_START());
+    return info.nums.length > 0 || !!findNextPage(scope, DOC_START());
+  }
+
+  function readJumpResult() {
+    try { return JSON.parse(sessionStorage.getItem(JUMP_RESULT) || "null"); } catch (e) { return null; }
+  }
+  function setJumpStatus(st) {
+    jumpStatus = st;
+    try { sessionStorage.setItem(JUMP_RESULT, JSON.stringify(st)); } catch (e) {}
+  }
+  function readJumpSession() {
+    try {
+      const s = JSON.parse(sessionStorage.getItem(JUMP_SESSION) || "null");
+      return s && Date.now() - s.at < 2 * 60 * 1000 ? s : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function writeJumpSession(s) {
+    try {
+      if (s) sessionStorage.setItem(JUMP_SESSION, JSON.stringify({ ...s, at: Date.now() }));
+      else sessionStorage.removeItem(JUMP_SESSION);
+    } catch (e) {}
+  }
+
+  // 이 카페의 좋아요 기록, 최근에 누른 순 (최대 300개)
+  function recentLikes() {
+    const ctx = pageCafe();
+    return Object.values(liked)
+      .filter((r) => r && /^\d+$/.test(String(r.a)) && ((ctx.c && r.c === ctx.c) || (ctx.n && r.n === ctx.n) || (!ctx.c && !ctx.n)))
+      .sort((x, y) => (y.t || 0) - (x.t || 0))
+      .slice(0, 300)
+      .map((r) => ({ c: r.c || null, n: r.n || null, a: String(r.a) }));
+  }
+
+  function startJump() {
+    if (!enabled || jumping || crawling || !isBoardPage()) return false;
+    const cands = recentLikes();
+    if (!cands.length) {
+      setJumpStatus({ state: "nolikes" });
+      return true;
+    }
+    runJump({ cands, ci: 0, seen: {}, phase: "first", pages: 0, target: null });
+    return true;
+  }
+
+  // 버튼을 누르고 목록이 바뀔 때까지 기다림 (페이지가 새로 로드되면 세션으로 이어감)
+  async function clickAndWait(btn, s) {
+    const before = boardList().items.map((i) => i.a).join(",");
+    writeJumpSession(s);
+    btn.click();
+    for (let w = 0; w < 40 && !jumpStop; w++) {
+      await sleep(200);
+      const now = boardList().items.map((i) => i.a).join(",");
+      if (now && now !== before) {
+        await sleep(300);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function highlightArticle(target) {
+    const ctx = pageCafe();
+    const link = [...document.querySelectorAll(ARTICLE_LINK_SELECTOR)].find((a) => {
+      if (a.closest(NOT_LIST_SELECTOR) || isNavButton(a)) return false;
+      const ids = resolve(a.getAttribute("href"), ctx);
+      return ids && same(target, ids);
+    });
+    if (!link) return;
+    const row = findRow(link, ctx);
+    row.scrollIntoView({ block: "center" });
+    row.classList.remove("ncl-jump-flash");
+    void row.offsetWidth;
+    row.classList.add("ncl-jump-flash");
+    setTimeout(() => row.classList.remove("ncl-jump-flash"), 2600);
+  }
+
+  async function runJump(s) {
+    if (jumping) return;
+    jumping = true;
+    jumpStop = false;
+    try {
+      for (let guard = 0; guard < JUMP_MAX_PAGES * 3; guard++) {
+        if (jumpStop || !enabled) { setJumpStatus({ state: "stopped", pages: s.pages }); break; }
+        const { scope, items } = boardList();
+        if (!items.length) { setJumpStatus({ state: "empty" }); break; }
+        const info = pagerInfo(scope, DOC_START());
+        const cur = info.curNo;
+
+        // 1) 1쪽으로
+        if (s.phase === "first") {
+          setJumpStatus({ state: "running", pages: s.pages, page: cur });
+          if (cur > 1) {
+            const back =
+              info.nums.find((b) => norm(b.textContent) === "1") ||
+              info.btns.find((b) => /(^|\s|[-_])(처음|맨\s?앞|first)($|\s|[-_])/i.test(norm(b.textContent) + " " + (b.getAttribute("aria-label") || "") + " " + b.className)) ||
+              info.btns.find((b) => /(^|\s|[-_])(이전|prev)($|\s|[-_]|\s?페이지)/i.test(norm(b.textContent) + " " + (b.getAttribute("aria-label") || "") + " " + b.className) && !/이전\s?글/.test(norm(b.textContent)));
+            if (back && (await clickAndWait(back, s))) continue;
+          }
+          s.phase = "scan";
+        }
+
+        // 2) 페이지를 넘기며 찾기
+        if (s.phase === "scan") {
+          s.pages++;
+          items.forEach((ids) => {
+            const i = s.cands.findIndex((c) => same(c, ids));
+            if (i >= 0 && s.seen[i] === undefined) s.seen[i] = cur;
+          });
+          // 목록 맨 아래쪽 글번호 (답글 등으로 순서가 조금 섞여도 안전하게 아래 3개 중 가장 큰 번호)
+          const tail = items.slice(-3).map((i) => +i.a).filter((x) => x > 0);
+          const bottom = tail.length ? Math.max(...tail) : 0;
+          while (s.ci < s.cands.length) {
+            if (s.seen[s.ci] !== undefined) {
+              s.target = { ...s.cands[s.ci], page: s.seen[s.ci] };
+              break;
+            }
+            if (bottom && +s.cands[s.ci].a > bottom) s.ci++; // 지나쳤는데 없었음 → 이 게시판 글이 아님
+            else break;
+          }
+          if (!s.target && s.ci >= s.cands.length) { setJumpStatus({ state: "notfound", pages: s.pages }); break; }
+          if (!s.target) {
+            const next = s.pages < JUMP_MAX_PAGES ? findNextPage(scope, DOC_START()) : null;
+            if (!next) {
+              // 끝까지 봤음: 본 것 중 가장 최근 좋아요
+              const seenIdx = Object.keys(s.seen).map(Number).sort((x, y) => x - y);
+              if (seenIdx.length) s.target = { ...s.cands[seenIdx[0]], page: s.seen[seenIdx[0]] };
+              else { setJumpStatus({ state: s.pages >= JUMP_MAX_PAGES ? "toofar" : "notfound", pages: s.pages }); break; }
+            } else {
+              setJumpStatus({ state: "running", pages: s.pages, page: cur });
+              if (!(await clickAndWait(next, s))) { setJumpStatus({ state: "interrupted", pages: s.pages }); break; }
+              continue;
+            }
+          }
+          s.phase = "goto";
+        }
+
+        // 3) 찾은 글이 있는 페이지로 (보통은 지금 페이지)
+        if (s.phase === "goto") {
+          const want = s.target.page;
+          if (cur === want) {
+            setJumpStatus({ state: "done", pages: s.pages, page: cur });
+            highlightArticle(s.target);
+            break;
+          }
+          setJumpStatus({ state: "running", pages: s.pages, page: cur });
+          const nums = info.nums.map((b) => +norm(b.textContent));
+          let btn = info.nums.find((b) => +norm(b.textContent) === want);
+          if (!btn) {
+            const re = want < Math.min(...nums, cur) ? /(^|\s|[-_])(이전|prev)($|\s|[-_]|\s?페이지)/i : /(^|\s|[-_])(다음|next)($|\s|[-_]|\s?페이지)/i;
+            btn = info.btns.find((b) => {
+              const label = norm(b.textContent) + " " + (b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "") + " " + b.className;
+              return re.test(label) && !/(이전|다음)\s?글/.test(label);
+            });
+          }
+          if (!btn || !(await clickAndWait(btn, s))) { setJumpStatus({ state: "interrupted", pages: s.pages }); break; }
+          continue;
+        }
+      }
+    } catch (e) {
+      setJumpStatus({ state: "interrupted", pages: s.pages });
+    } finally {
+      writeJumpSession(null);
+      jumping = false;
+      jumpStop = false;
+    }
+  }
+
+  // 팝업과 주고받기: 게시판 목록이 있는 화면(프레임)만 대답함
+  if (chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (!msg || msg.type !== "ncl-jump") return false;
+      if (!jumping && !isBoardPage()) return false;
+      if (msg.action === "start") sendResponse({ ok: startJump() });
+      else if (msg.action === "stop") { jumpStop = true; sendResponse({ ok: true }); }
+      else sendResponse({ jumping, status: jumpStatus, likes: recentLikes().length });
+      return false;
+    });
+  }
+
   // ---------- 페이지 변화 감시 ----------
   // 새 링크가 화면에 추가될 때만, 다음 화면 그리기 직전에 한 번 목록 표시
   let rafPending = false;
@@ -1475,6 +1705,16 @@
   load().then(() => {
     markList();
     scheduleImportCheck();
+    // 이동 중에 페이지가 새로 로드됐으면 목록이 뜬 뒤 이어서 찾음
+    if (enabled && readJumpSession()) {
+      const resume = (n) => {
+        const s = readJumpSession();
+        if (!s || jumping) return;
+        if (boardList().items.length) runJump(s);
+        else if (n < 25) setTimeout(() => resume(n + 1), 200);
+      };
+      setTimeout(() => resume(0), 300);
+    }
     // 주소가 바뀌는 SPA 이동 대응
     let lastHref = location.href;
     setInterval(() => {

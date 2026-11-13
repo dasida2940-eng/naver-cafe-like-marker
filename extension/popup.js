@@ -3,7 +3,69 @@ function updateStyleSection(mode) {
   document.getElementById("style").classList.toggle("off", mode === "bg");
 }
 
-chrome.storage.local.get(["displayMode", "heartStyle", "likedArticles"], (r) => {
+// ---------- 켜기/끄기: 끄면 표시·기록·가져오기·이동이 모두 멈춤 ----------
+const enabledBox = document.getElementById("enabled");
+function showPower(on) {
+  enabledBox.checked = on;
+  document.body.classList.toggle("disabled", !on);
+  document.getElementById("powerText").textContent = on ? "켜짐" : "꺼짐";
+  document.getElementById("powerSub").textContent = on ? "좋아요한 글을 표시하고 기록해요" : "표시·기록이 모두 멈춰 있어요";
+}
+enabledBox.addEventListener("change", () => {
+  chrome.storage.local.set({ enabled: enabledBox.checked });
+  showPower(enabledBox.checked);
+  setTimeout(() => { // ---------- 최근 좋아요한 글로 이동 (지금 탭의 게시판 목록과 주고받음) ----------
+const jmsg = document.getElementById("jmsg");
+const jbtns = document.getElementById("jbtns");
+let jpoll = 0;
+let wasJumping = false;
+let jmissed = 0;
+const askJump = (action, cb) => ask(action, {}, cb, "ncl-jump");
+
+function refreshJump() {
+  askJump("status", (res) => {
+    clearTimeout(jpoll);
+    // 페이지가 새로 로드되는 중에는 잠깐 대답이 없음
+    if (!res && wasJumping && jmissed < 20) {
+      jmissed++;
+      jmsg.textContent = "다음 페이지를 불러오는 중…";
+      jpoll = setTimeout(refreshJump, 500);
+      return;
+    }
+    jmissed = 0;
+    wasJumping = !!(res && res.jumping);
+    if (!res) {
+      jmsg.textContent = "카페 게시판 목록에서 이 창을 열면, 그 게시판에서 가장 최근에 좋아요한 글이 있는 페이지로 이동할 수 있어요.";
+      buttons([], jbtns);
+      return;
+    }
+    const s = res.status || {};
+    if (res.jumping) {
+      jmsg.textContent = `찾는 중… ${s.pages || 0}페이지 확인\n이 창을 닫아도 계속돼요.`;
+      buttons([["중지", () => askJump("stop", () => setTimeout(refreshJump, 300))]], jbtns);
+      jpoll = setTimeout(refreshJump, 500);
+      return;
+    }
+    const msgs = {
+      done: `${s.page}페이지로 이동했어요. 그 글을 표시해 뒀어요.`,
+      notfound: "이 게시판에서는 좋아요한 글을 찾지 못했어요.",
+      toofar: `${s.pages}페이지까지 찾아봤지만 없었어요.`,
+      nolikes: "이 카페에 저장된 좋아요가 없어요.",
+      empty: "목록을 찾지 못했어요. 목록이 다 뜬 뒤 다시 눌러 주세요.",
+      stopped: "중지했어요.",
+      interrupted: "페이지를 넘기지 못해 멈췄어요. 다시 눌러 주세요."
+    };
+    jmsg.textContent = msgs[s.state] || "이 게시판에서 가장 최근에 좋아요한 글이 있는 페이지로 이동해요. 1페이지부터 차례로 넘기며 찾아요.";
+    buttons([["최근 좋아요한 글로 이동", () => askJump("start", () => setTimeout(refreshJump, 200)), true]], jbtns);
+  });
+}
+
+refresh();
+refreshJump(); refreshJump(); }, 300);
+});
+
+chrome.storage.local.get(["displayMode", "heartStyle", "likedArticles", "enabled"], (r) => {
+  showPower(r.enabled !== false);
   const mode = r.displayMode || "bg";
   const style = r.heartStyle || "text";
   document.querySelector(`input[name="mode"][value="${mode}"]`).checked = true;
@@ -27,11 +89,11 @@ document.querySelectorAll('input[name="heartStyle"]').forEach((input) => {
 });
 
 // ---------- 좋아요한 글 가져오기 (지금 탭의 카페 화면과 주고받음) ----------
-function ask(action, extra, cb) {
+function ask(action, extra, cb, type = "ncl-import") {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tab = tabs && tabs[0];
     if (!tab) return cb(null);
-    chrome.tabs.sendMessage(tab.id, { type: "ncl-import", action, ...extra }, (res) => {
+    chrome.tabs.sendMessage(tab.id, { type, action, ...extra }, (res) => {
       void chrome.runtime.lastError; // 카페 화면이 아니면 대답이 없음
       cb(res || null);
     });
@@ -42,14 +104,14 @@ const imsg = document.getElementById("imsg");
 const ibtns = document.getElementById("ibtns");
 let poll = 0;
 
-function buttons(list) {
-  ibtns.textContent = "";
+function buttons(list, box = ibtns) {
+  box.textContent = "";
   list.forEach(([label, fn, primary]) => {
     const b = document.createElement("button");
     b.textContent = label;
     if (primary) b.className = "primary";
     b.addEventListener("click", fn);
-    ibtns.appendChild(b);
+    box.appendChild(b);
   });
 }
 
@@ -112,4 +174,51 @@ function refresh() {
   });
 }
 
+// ---------- 최근 좋아요한 글로 이동 (지금 탭의 게시판 목록과 주고받음) ----------
+const jmsg = document.getElementById("jmsg");
+const jbtns = document.getElementById("jbtns");
+let jpoll = 0;
+let wasJumping = false;
+let jmissed = 0;
+const askJump = (action, cb) => ask(action, {}, cb, "ncl-jump");
+
+function refreshJump() {
+  askJump("status", (res) => {
+    clearTimeout(jpoll);
+    // 페이지가 새로 로드되는 중에는 잠깐 대답이 없음
+    if (!res && wasJumping && jmissed < 20) {
+      jmissed++;
+      jmsg.textContent = "다음 페이지를 불러오는 중…";
+      jpoll = setTimeout(refreshJump, 500);
+      return;
+    }
+    jmissed = 0;
+    wasJumping = !!(res && res.jumping);
+    if (!res) {
+      jmsg.textContent = "카페 게시판 목록에서 이 창을 열면, 그 게시판에서 가장 최근에 좋아요한 글이 있는 페이지로 이동할 수 있어요.";
+      buttons([], jbtns);
+      return;
+    }
+    const s = res.status || {};
+    if (res.jumping) {
+      jmsg.textContent = `찾는 중… ${s.pages || 0}페이지 확인\n이 창을 닫아도 계속돼요.`;
+      buttons([["중지", () => askJump("stop", () => setTimeout(refreshJump, 300))]], jbtns);
+      jpoll = setTimeout(refreshJump, 500);
+      return;
+    }
+    const msgs = {
+      done: `${s.page}페이지로 이동했어요. 그 글을 표시해 뒀어요.`,
+      notfound: "이 게시판에서는 좋아요한 글을 찾지 못했어요.",
+      toofar: `${s.pages}페이지까지 찾아봤지만 없었어요.`,
+      nolikes: "이 카페에 저장된 좋아요가 없어요.",
+      empty: "목록을 찾지 못했어요. 목록이 다 뜬 뒤 다시 눌러 주세요.",
+      stopped: "중지했어요.",
+      interrupted: "페이지를 넘기지 못해 멈췄어요. 다시 눌러 주세요."
+    };
+    jmsg.textContent = msgs[s.state] || "이 게시판에서 가장 최근에 좋아요한 글이 있는 페이지로 이동해요. 1페이지부터 차례로 넘기며 찾아요.";
+    buttons([["최근 좋아요한 글로 이동", () => askJump("start", () => setTimeout(refreshJump, 200)), true]], jbtns);
+  });
+}
+
 refresh();
+refreshJump();
