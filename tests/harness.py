@@ -35,7 +35,7 @@ STUB = """
       set(o) { const ch = {}; for (const k in o) ch[k] = { oldValue: d[k], newValue: o[k] }; Object.assign(d, o); window.__ls.forEach(f => f(ch, 'local')); }
     },
     onChanged: { addListener(f) { window.__ls.push(f); } }
-  } };
+  }, runtime: { id: 'test', onMessage: { addListener(f) { (window.__msg = window.__msg || []).push(f); } } } };
 })();
 """
 
