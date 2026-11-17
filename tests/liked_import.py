@@ -30,7 +30,7 @@ STUB = """
       set(o, cb) { const d = load(); const ch = {}; for (const k in o) ch[k] = { oldValue: d[k], newValue: o[k] }; Object.assign(d, o); localStorage.setItem(K, JSON.stringify(d)); ls.forEach(f => f(ch, 'local')); cb && cb(); }
     },
     onChanged: { addListener(f) { ls.push(f); } }
-  }, runtime: { id: 'test', onMessage: { addListener(f) { (window.__msg = window.__msg || []).push(f); } } } };
+  }, runtime: { onMessage: { addListener(f) { (window.__msg = window.__msg || []).push(f); } } } };
 })();
 """
 

@@ -10,25 +10,12 @@
   const MODE_KEY = "displayMode";      // "bg" | "bg_heart" | "heart"
   const STYLE_KEY = "heartStyle";      // "text"(♥ 좋아요) | "icon"(♥)
   const ENABLED_KEY = "enabled";       // false면 확장 전체가 꺼짐 (표시·기록·가져오기·이동 모두 안 함)
-  const AUTO_KEY = "autoRefresh";      // false면 오래 열어 둔 화면 자동 새로고침 안 함
-  const PENDING_KEY = "ncl-pending";   // 확장과 끊긴 탭에서 누른 좋아요를 잠시 보관 (이 사이트의 localStorage)
-
-  // 확장이 업데이트·다시 로드되면 이미 열려 있던 탭의 이 스크립트는 확장과 끊김
-  // → chrome.* 호출이 예외를 냄. 저장은 이 함수로만 하고, 실패하면 false
-  function alive() {
-    try { return !!(chrome.runtime && chrome.runtime.id); } catch (e) { return false; }
-  }
-  function store(obj) {
-    if (!alive()) return false;
-    try { chrome.storage.local.set(obj); return true; } catch (e) { return false; }
-  }
 
   let liked = {};
   let cafeMap = {};
   let mode = "bg";
   let heartStyle = "text";
   let enabled = true;
-  let autoRefresh = true;
   let index = new Map(); // 글번호 → [기록...]  (빠른 조회용)
 
   // 카페 이름으로 오인하면 안 되는 주소 첫 부분
@@ -117,7 +104,7 @@
     // 카페번호와 이름을 둘 다 알면 기억해 둠
     if (info.c && info.n && cafeMap[info.c] !== info.n) {
       cafeMap[info.c] = info.n;
-      store({ [MAP_KEY]: cafeMap });
+      chrome.storage.local.set({ [MAP_KEY]: cafeMap });
     }
     return info;
   }
@@ -191,22 +178,21 @@
 
   function load() {
     return new Promise((done) => {
-      chrome.storage.local.get([STORAGE_KEY, MAP_KEY, MODE_KEY, STYLE_KEY, ENABLED_KEY, AUTO_KEY], (r) => {
+      chrome.storage.local.get([STORAGE_KEY, MAP_KEY, MODE_KEY, STYLE_KEY, ENABLED_KEY], (r) => {
         enabled = r[ENABLED_KEY] !== false;
-        autoRefresh = r[AUTO_KEY] !== false;
         cafeMap = r[MAP_KEY] || {};
         mode = r[MODE_KEY] || "bg";
         heartStyle = r[STYLE_KEY] || "text";
         const { out, changed } = migrate(r[STORAGE_KEY]);
         liked = out;
-        if (changed) store({ [STORAGE_KEY]: liked });
+        if (changed) chrome.storage.local.set({ [STORAGE_KEY]: liked });
         rebuildIndex();
         done();
       });
     });
   }
 
-  function setLiked(ids, value, at) {
+  function setLiked(ids, value) {
     const now = isLiked(ids);
     if (value === now) {
       // 이미 저장돼 있는데 카페 정보가 빠진 기록이면 보충
@@ -216,7 +202,7 @@
       delete liked[recKey(rec)];
     }
     if (value) {
-      const rec = { c: ids.c, n: ids.n, a: ids.a, t: at || Date.now() };
+      const rec = { c: ids.c, n: ids.n, a: ids.a, t: Date.now() };
       liked[recKey(rec)] = rec;
     } else {
       Object.keys(liked).forEach((k) => {
@@ -224,51 +210,7 @@
       });
     }
     rebuildIndex();
-    if (!store({ [STORAGE_KEY]: liked })) keepPending(ids, value);
-  }
-
-  // 확장과 끊긴 탭(확장 업데이트 뒤 새로고침 전)에서 누른 좋아요: 이 사이트에 잠시 보관했다가
-  // 새로고침 후 새 확장이 반영함. 이 탭은 화면 표시만 바뀌고 저장은 못 하므로 안내를 띄움
-  function keepPending(ids, value) {
-    try {
-      const list = JSON.parse(localStorage.getItem(PENDING_KEY) || "[]").filter((x) => !(x.a === ids.a && x.c === ids.c && x.n === ids.n));
-      list.push({ c: ids.c || null, n: ids.n || null, a: ids.a, v: !!value, t: Date.now() });
-      localStorage.setItem(PENDING_KEY, JSON.stringify(list.slice(-200)));
-    } catch (e) { /* 저장 공간이 없으면 포기 */ }
-    showToast("좋아요 표시 확장이 업데이트됐어요. 새로고침하면 방금 누른 좋아요가 저장돼요.", "새로고침", () => reloadKeepingPlace());
-  }
-
-  function applyPending() {
-    let list = [];
-    try { list = JSON.parse(localStorage.getItem(PENDING_KEY) || "[]"); } catch (e) { list = []; }
-    if (!list.length) return;
-    try { localStorage.removeItem(PENDING_KEY); } catch (e) {}
-    list.forEach((x) => setLiked({ c: x.c, n: x.n, a: x.a }, x.v, x.t));
-  }
-
-  function showToast(text, action, onAction) {
-    const old = document.getElementById("ncl-toast");
-    if (old) old.remove();
-    const box = document.createElement("div");
-    box.id = "ncl-toast";
-    box.className = "ncl-toast";
-    const msg = document.createElement("span");
-    msg.textContent = text;
-    box.appendChild(msg);
-    if (action) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = action;
-      b.addEventListener("click", onAction);
-      box.appendChild(b);
-    }
-    const x = document.createElement("button");
-    x.type = "button";
-    x.className = "ncl-toast-close";
-    x.textContent = "×";
-    x.addEventListener("click", () => box.remove());
-    box.appendChild(x);
-    (document.body || document.documentElement).appendChild(box);
+    chrome.storage.local.set({ [STORAGE_KEY]: liked });
   }
 
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -282,14 +224,10 @@
       ctxCache = null;
     }
     if (changes[MODE_KEY]) mode = changes[MODE_KEY].newValue || "bg";
-    if (changes[AUTO_KEY]) autoRefresh = changes[AUTO_KEY].newValue !== false;
     if (changes[ENABLED_KEY]) {
-      const was = enabled;
       enabled = changes[ENABLED_KEY].newValue !== false;
       // 끄면 하던 가져오기·이동도 멈춤 (표시는 아래 markList에서 모두 지워짐)
       if (!enabled) { stopRequested = true; jumpStop = true; }
-      // 다시 켜면 처음 실행한 것처럼: 화면 계산 결과를 모두 비우고 다시 그림 (저장된 기록은 그대로)
-      if (enabled && !was) restartFresh();
     }
     if (changes[STYLE_KEY]) {
       heartStyle = changes[STYLE_KEY].newValue || "text";
@@ -1347,7 +1285,7 @@
     });
     if (added || changed) {
       rebuildIndex();
-      store({ [STORAGE_KEY]: liked });
+      chrome.storage.local.set({ [STORAGE_KEY]: liked });
     }
     return added;
   }
@@ -1363,13 +1301,12 @@
   let importStatus = { state: "idle", pages: 0, added: 0, total: 0, mode: "" };
 
   function readImportState(cb) {
-    if (!alive()) return cb({});
-    try { chrome.storage.local.get([IMPORT_KEY], (r) => cb(r[IMPORT_KEY] || {})); } catch (e) { cb({}); }
+    chrome.storage.local.get([IMPORT_KEY], (r) => cb(r[IMPORT_KEY] || {}));
   }
   function writeImportState(key, value) {
     readImportState((map) => {
       map[key] = value;
-      store({ [IMPORT_KEY]: map });
+      chrome.storage.local.set({ [IMPORT_KEY]: map });
     });
   }
 
@@ -1754,153 +1691,6 @@
     });
   }
 
-  // ---------- 다시 켰을 때 완전 재시작 (저장된 기록·설정은 그대로) ----------
-  function restartFresh() {
-    ctxCache = null;
-    clearHearts();
-    scheduleMark();
-  }
-
-  // ---------- 오래 열어 둔 화면 자동 새로고침 + 보던 위치로 돌아가기 ----------
-  // 네이버 카페는 화면을 오래 열어 두면 클릭을 막고 새로고침하라고 함 (네이버 보안 장치, 확장이 바꿀 수 없음).
-  // 이 화면(프레임)을 연 지 10분이 지난 뒤 처음 다시 조작하거나 탭으로 돌아오면, 클릭하기 전에 미리 새로고침함.
-  // 다른 탭에 있는 동안이나 가만히 보고만 있을 때는 새로고침하지 않음. 글쓰기·댓글 입력 중에도 하지 않음.
-  const AUTO_MS = typeof window.__nclAutoMs === "number" ? window.__nclAutoMs : 10 * 60 * 1000;
-  const PLACE_KEY = "ncl-place:";
-  const loadedAt = Date.now();
-  let reloading = false;
-
-  // 스크롤되는 창: 예전 카페(안쪽 화면 iframe)는 바깥 창이 스크롤됨
-  function scroller() {
-    try {
-      if (window !== window.top && window.frameElement) return { win: window.parent, dy: window.frameElement.getBoundingClientRect().top };
-    } catch (e) { /* 다른 출처 */ }
-    return { win: window, dy: 0 };
-  }
-
-  // 화면 맨 위쪽에 보이는 목록 글 (새 글이 올라와 목록이 밀려도 그 글로 돌아가기 위해)
-  function topVisibleRow() {
-    const { dy } = scroller();
-    const ctx = pageCafe();
-    let best = null;
-    for (const a of document.querySelectorAll(ARTICLE_LINK_SELECTOR)) {
-      if (a.closest(NOT_LIST_SELECTOR) || a.closest(ARTICLE_BODY_SELECTOR) || isNavButton(a)) continue;
-      const ids = resolve(a.getAttribute("href"), ctx);
-      if (!ids || !ids.a) continue;
-      const r = findRow(a, ctx).getBoundingClientRect();
-      if (!r.height) continue;
-      const top = r.top + dy;
-      if (top >= -r.height / 2 && (!best || top < best.top)) best = { ids, top };
-    }
-    return best;
-  }
-
-  function placeKey() {
-    return PLACE_KEY + location.pathname + location.search;
-  }
-
-  function savePlace() {
-    try {
-      const { win } = scroller();
-      const row = topVisibleRow();
-      sessionStorage.setItem(placeKey(), JSON.stringify({
-        y: win.scrollY,
-        row: row ? { c: row.ids.c, n: row.ids.n, a: row.ids.a, top: row.top } : null,
-        at: Date.now()
-      }));
-    } catch (e) {}
-  }
-
-  function restorePlace() {
-    let saved = null;
-    try {
-      saved = JSON.parse(sessionStorage.getItem(placeKey()) || "null");
-      sessionStorage.removeItem(placeKey());
-    } catch (e) {}
-    if (!saved || Date.now() - saved.at > 60 * 1000) return;
-    let userMoved = false;
-    const stop = () => { userMoved = true; };
-    ["wheel", "keydown", "touchstart", "mousedown"].forEach((ev) => window.addEventListener(ev, stop, { capture: true, passive: true, once: true }));
-    const apply = () => {
-      if (userMoved) return;
-      const { win, dy } = scroller();
-      if (saved.row) {
-        const ctx = pageCafe();
-        const link = [...document.querySelectorAll(ARTICLE_LINK_SELECTOR)].find((a) => {
-          if (a.closest(NOT_LIST_SELECTOR) || isNavButton(a)) return false;
-          const ids = resolve(a.getAttribute("href"), ctx);
-          return ids && same(saved.row, ids);
-        });
-        if (link) {
-          const top = findRow(link, ctx).getBoundingClientRect().top + dy;
-          win.scrollBy(0, top - saved.row.top);
-          return;
-        }
-      }
-      win.scrollTo(0, saved.y);
-    };
-    // 사진 등이 늦게 떠서 높이가 바뀌므로 몇 번 다시 맞춤
-    [0, 400, 1200, 2500].forEach((ms) => setTimeout(apply, ms));
-  }
-
-  // 예전 카페: 바깥 창을 새로고침하면 안쪽 화면이 첫 화면으로 돌아가므로 안쪽 화면 주소를 붙여서 엶
-  function topReloadUrl() {
-    try {
-      const f = document.getElementById("cafe_main");
-      if (window === window.top && f && f.contentWindow && f.contentWindow.location.href !== "about:blank") {
-        const inner = f.contentWindow.location;
-        if (inner.hostname === location.hostname) {
-          const u = new URL(location.href);
-          u.searchParams.delete("iframe_url");
-          // 한 번만 인코딩 (주소 창에서 풀면 안쪽 주소 그대로가 되도록)
-          u.searchParams.set("iframe_url_utf8", inner.pathname + inner.search);
-          return u.href;
-        }
-      }
-    } catch (e) {}
-    return null;
-  }
-
-  function reloadKeepingPlace() {
-    if (reloading) return;
-    reloading = true;
-    savePlace();
-    const url = topReloadUrl();
-    if (url) location.href = url;
-    else location.reload();
-  }
-
-  function isEditing() {
-    if (/(write|modify|edit)/i.test(location.pathname + location.search)) return true; // 글쓰기·수정 화면
-    const a = document.activeElement;
-    if (a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return true;
-    // 써 둔 내용이 있는 입력칸(댓글 등)
-    for (const t of document.querySelectorAll("textarea, [contenteditable='true'], [contenteditable='']")) {
-      if ((t.value || t.textContent || "").trim()) return true;
-    }
-    return false;
-  }
-
-  function maybeAutoRefresh() {
-    if (reloading || !autoRefresh || !enabled || Date.now() - loadedAt < AUTO_MS) return;
-    if (crawling || jumping || isEditing()) return;
-    reloadKeepingPlace();
-  }
-  ["mousemove", "mousedown", "keydown", "wheel", "touchstart", "focus"].forEach((ev) =>
-    window.addEventListener(ev, maybeAutoRefresh, { capture: true, passive: true }));
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") maybeAutoRefresh();
-  });
-
-  // 팝업이 이 탭과 연결돼 있는지 확인할 때 대답 (끊긴 탭은 대답하지 못함)
-  if (chrome.runtime && chrome.runtime.onMessage) {
-    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-      if (!msg || msg.type !== "ncl-ping") return false;
-      sendResponse({ ok: true });
-      return false;
-    });
-  }
-
   // ---------- 페이지 변화 감시 ----------
   // 새 링크가 화면에 추가될 때만, 다음 화면 그리기 직전에 한 번 목록 표시
   let rafPending = false;
@@ -1939,8 +1729,6 @@
   }
 
   load().then(() => {
-    applyPending();   // 확장과 끊겨 있던 동안 누른 좋아요 반영
-    restorePlace();   // 자동 새로고침 전에 보던 위치로
     markList();
     scheduleImportCheck();
     // 이동 중에 페이지가 새로 로드됐으면 목록이 뜬 뒤 이어서 찾음

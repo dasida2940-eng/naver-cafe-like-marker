@@ -64,28 +64,8 @@ refresh();
 refreshJump(); refreshJump(); }, 300);
 });
 
-// ---------- 오래 열어 둔 화면 자동 새로고침 (기본 켜짐) ----------
-const autoBox = document.getElementById("auto");
-autoBox.addEventListener("change", () => chrome.storage.local.set({ autoRefresh: autoBox.checked }));
-
-// ---------- 지금 탭이 확장과 끊겼는지 (확장 업데이트 전에 열린 카페 탭) ----------
-chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-  const tab = tabs && tabs[0];
-  if (!tab || !/^https:\/\/cafe\.naver\.com\//.test(tab.url || "")) return;
-  chrome.tabs.sendMessage(tab.id, { type: "ncl-ping" }, (res) => {
-    void chrome.runtime.lastError;
-    if (res && res.ok) return;
-    document.getElementById("stale").classList.add("show");
-    document.getElementById("staleReload").addEventListener("click", () => {
-      chrome.tabs.reload(tab.id);
-      window.close();
-    });
-  });
-});
-
-chrome.storage.local.get(["displayMode", "heartStyle", "likedArticles", "enabled", "autoRefresh"], (r) => {
+chrome.storage.local.get(["displayMode", "heartStyle", "likedArticles", "enabled"], (r) => {
   showPower(r.enabled !== false);
-  autoBox.checked = r.autoRefresh !== false;
   const mode = r.displayMode || "bg";
   const style = r.heartStyle || "text";
   document.querySelector(`input[name="mode"][value="${mode}"]`).checked = true;
