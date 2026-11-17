@@ -64,8 +64,13 @@ refresh();
 refreshJump(); refreshJump(); }, 300);
 });
 
-chrome.storage.local.get(["displayMode", "heartStyle", "likedArticles", "enabled"], (r) => {
+// ---------- 새로고침해도 보던 위치 유지 (기본 켜짐) ----------
+const keepBox = document.getElementById("keep");
+keepBox.addEventListener("change", () => chrome.storage.local.set({ keepScroll: keepBox.checked }));
+
+chrome.storage.local.get(["displayMode", "heartStyle", "likedArticles", "enabled", "keepScroll"], (r) => {
   showPower(r.enabled !== false);
+  keepBox.checked = r.keepScroll !== false;
   const mode = r.displayMode || "bg";
   const style = r.heartStyle || "text";
   document.querySelector(`input[name="mode"][value="${mode}"]`).checked = true;
