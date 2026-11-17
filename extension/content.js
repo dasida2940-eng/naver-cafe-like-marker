@@ -1695,14 +1695,13 @@
     });
   }
 
-  // ---------- 새로고침해도 보던 위치로 ----------
-  // 새로고침(F5 등)할 때 보던 위치를 적어 두었다가, 새로 뜬 화면에서 그 위치로 돌아감.
+  // ---------- 새로고침해도 보던 위치로 (글 보기 화면만) ----------
+  // 글을 읽다가 새로고침(F5 등)하면 같은 글의 같은 스크롤 위치로 돌아감. 목록 화면은 건드리지 않음.
   // 링크로 다른 페이지에 갈 때는 동작하지 않음. 팝업에서 끌 수 있음.
-  // - 목록: 화면 맨 위에 보이던 글을 기억 → 새 글이 올라와 목록이 밀려도 그 글로
-  // - 예전 카페(안쪽 화면 iframe): 바깥 창을 새로고침하면 안쪽 화면이 카페 첫 화면으로 돌아가므로,
-  //   보던 안쪽 화면 주소를 다시 열고 그 안에서 위치를 맞춤
+  // 예전 카페(안쪽 화면 iframe)는 바깥 창을 새로고침하면 안쪽 화면이 카페 첫 화면으로 돌아가므로,
+  // 보던 글이었으면 그 글을 다시 열고 위치를 맞춤
   const PLACE_KEY = "ncl-place:";
-  const INNER_KEY = "ncl-place-inner";   // 바깥 창 새로고침 뒤 다시 열 안쪽 화면 주소
+  const INNER_KEY = "ncl-place-inner";   // 바깥 창 새로고침 뒤 다시 열 안쪽 화면(글) 주소
 
   function isReload() {
     try {
@@ -1714,29 +1713,18 @@
     }
   }
 
-  // 스크롤되는 창: 예전 카페(안쪽 화면 iframe)는 바깥 창이 스크롤됨
-  function scroller() {
-    try {
-      if (window !== window.top && window.frameElement) return { win: window.parent, dy: window.frameElement.getBoundingClientRect().top };
-    } catch (e) { /* 다른 출처 */ }
-    return { win: window, dy: 0 };
+  // 글 보기 화면 주소인지 (글 번호가 있는 주소: ArticleRead, /articles/123, /카페이름/123)
+  function isArticleUrl(href) {
+    const r = parseUrlRaw(href);
+    return !!(r && r.a);
   }
 
-  // 화면 맨 위쪽에 보이는 목록 글
-  function topVisibleRow() {
-    const { dy } = scroller();
-    const ctx = pageCafe();
-    let best = null;
-    for (const a of document.querySelectorAll(ARTICLE_LINK_SELECTOR)) {
-      if (a.closest(NOT_LIST_SELECTOR) || a.closest(ARTICLE_BODY_SELECTOR) || isNavButton(a)) continue;
-      const ids = resolve(a.getAttribute("href"), ctx);
-      if (!ids || !ids.a) continue;
-      const r = findRow(a, ctx).getBoundingClientRect();
-      if (!r.height) continue;
-      const top = r.top + dy;
-      if (top >= -r.height / 2 && (!best || top < best.top)) best = { ids, top };
-    }
-    return best;
+  // 스크롤되는 창: 예전 카페(안쪽 화면 iframe)는 바깥 창이 스크롤됨
+  function scrollWin() {
+    try {
+      if (window !== window.top && window.frameElement) return window.parent;
+    } catch (e) { /* 다른 출처 */ }
+    return window;
   }
 
   function placeKey() {
@@ -1753,19 +1741,16 @@
 
   function savePlace() {
     try {
-      const { win } = scroller();
-      const row = topVisibleRow();
-      sessionStorage.setItem(placeKey(), JSON.stringify({
-        y: win.scrollY,
-        row: row ? { c: row.ids.c, n: row.ids.n, a: row.ids.a, top: row.top } : null,
-        at: Date.now()
-      }));
-      // 바깥 창: 지금 보던 안쪽 화면 주소
+      // 바깥 창: 안쪽 화면이 글이면 그 주소를 기억 (위치는 안쪽 화면이 저장)
       const f = innerFrame();
-      if (f && f.contentWindow.location.href !== "about:blank") {
+      if (f) {
         const loc = f.contentWindow.location;
-        sessionStorage.setItem(INNER_KEY, JSON.stringify({ top: placeKey(), url: loc.pathname + loc.search, at: Date.now() }));
+        if (isArticleUrl(loc.href)) sessionStorage.setItem(INNER_KEY, JSON.stringify({ top: placeKey(), url: loc.pathname + loc.search, at: Date.now() }));
+        else sessionStorage.removeItem(INNER_KEY);
+        return;
       }
+      if (!isArticleUrl(location.href)) return;
+      sessionStorage.setItem(placeKey(), JSON.stringify({ y: scrollWin().scrollY, at: Date.now() }));
     } catch (e) {}
   }
 
@@ -1782,68 +1767,48 @@
     let userMoved = false;
     const stop = () => { userMoved = true; };
     ["wheel", "keydown", "touchstart", "mousedown"].forEach((ev) => window.addEventListener(ev, stop, { capture: true, passive: true, once: true }));
-    const apply = () => {
-      if (userMoved) return;
-      const { win, dy } = scroller();
-      if (saved.row) {
-        const ctx = pageCafe();
-        const link = [...document.querySelectorAll(ARTICLE_LINK_SELECTOR)].find((a) => {
-          if (a.closest(NOT_LIST_SELECTOR) || isNavButton(a)) return false;
-          const ids = resolve(a.getAttribute("href"), ctx);
-          return ids && same(saved.row, ids);
-        });
-        if (link) {
-          const top = findRow(link, ctx).getBoundingClientRect().top + dy;
-          win.scrollBy(0, top - saved.row.top);
-          return;
-        }
-      }
-      win.scrollTo(0, saved.y);
-    };
     // 사진 등이 늦게 떠서 높이가 바뀌므로 몇 번 다시 맞춤
-    [0, 400, 1200, 2500].forEach((ms) => setTimeout(apply, ms));
+    [0, 400, 1200, 2500].forEach((ms) => setTimeout(() => { if (!userMoved) scrollWin().scrollTo(0, saved.y); }, ms));
   }
 
   function restorePlace() {
     if (!enabled || !keepScroll) return;
-    // 안쪽 화면: 바깥 창 새로고침 뒤 우리가 다시 연 화면이면 그 안에서 위치를 맞춤
+    let inner = null;
+    try { inner = JSON.parse(sessionStorage.getItem(INNER_KEY) || "null"); } catch (e) {}
+    if (inner && Date.now() - inner.at > 60 * 1000) inner = null;
+
+    // 안쪽 화면(글)
     if (window !== window.top) {
-      let inner = null;
-      try { inner = JSON.parse(sessionStorage.getItem(INNER_KEY) || "null"); } catch (e) {}
-      if (inner && inner.reopened && inner.url === location.pathname + location.search && Date.now() - inner.at < 60 * 1000) {
-        try { sessionStorage.removeItem(INNER_KEY); } catch (e) {}
-        const saved = readPlace();
-        if (saved) applyPlace(saved);
-        return;
-      }
-      if (!isReload()) return;
+      if (!isArticleUrl(location.href)) return;
+      const reopened = inner && inner.reopened && inner.url === location.pathname + location.search;
+      if (reopened) { try { sessionStorage.removeItem(INNER_KEY); } catch (e) {} }
+      if (!reopened && !isReload()) return;
       const saved = readPlace();
       if (saved) applyPlace(saved);
       return;
     }
+
     if (!isReload()) return;
-    const saved = readPlace();
-    // 바깥 창: 안쪽 화면이 카페 첫 화면으로 돌아갔으면 보던 안쪽 화면을 다시 엶 (위치는 안쪽 화면이 맞춤)
-    let inner = null;
-    try { inner = JSON.parse(sessionStorage.getItem(INNER_KEY) || "null"); } catch (e) {}
-    if (inner && inner.top === placeKey() && Date.now() - inner.at < 60 * 1000) {
+    // 바깥 창(예전 카페): 보던 글이 있었으면 안쪽 화면에 다시 엶
+    if (inner && inner.top === placeKey()) {
       const reopen = () => {
-        const f = innerFrame() || document.getElementById("cafe_main");
+        const f = document.getElementById("cafe_main");
         if (!f) return false;
+        try { sessionStorage.setItem(INNER_KEY, JSON.stringify({ ...inner, reopened: true, at: Date.now() })); } catch (e) {}
         let now = "";
         try { now = f.contentWindow.location.pathname + f.contentWindow.location.search; } catch (e) {}
-        if (now === inner.url) { try { sessionStorage.removeItem(INNER_KEY); } catch (e) {} if (saved) applyPlace(saved); return true; }
-        try { sessionStorage.setItem(INNER_KEY, JSON.stringify({ ...inner, reopened: true, at: Date.now() })); } catch (e) {}
-        f.src = inner.url;
+        if (now !== inner.url) f.src = inner.url;
         return true;
       };
       if (!reopen()) {
-        // 안쪽 화면 틀이 아직 없으면 잠깐 기다림
         let n = 0;
         const t = setInterval(() => { if (reopen() || ++n > 25) clearInterval(t); }, 200);
       }
       return;
     }
+    // 새 방식 카페의 글 보기 화면
+    if (!isArticleUrl(location.href)) return;
+    const saved = readPlace();
     if (saved) applyPlace(saved);
   }
 
@@ -1889,7 +1854,7 @@
   }
 
   load().then(() => {
-    restorePlace();   // 새로고침이면 보던 위치로
+    restorePlace();   // 글 보기 화면을 새로고침했으면 보던 위치로
     markList();
     scheduleImportCheck();
     // 이동 중에 페이지가 새로 로드됐으면 목록이 뜬 뒤 이어서 찾음

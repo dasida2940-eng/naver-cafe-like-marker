@@ -1,8 +1,8 @@
-"""새로고침해도 보던 위치 유지 테스트: python3 tests/keep_scroll.py extension
+"""새로고침해도 읽던 위치 유지 테스트 (글 보기 화면만): python3 tests/keep_scroll.py extension
 
-- 새로고침하면 화면 맨 위에 있던 글로 돌아감 (새 글이 올라와 목록이 밀려도)
-- 링크로 이동할 때·기능을 끈 때·확장을 끈 때는 하지 않음
-- 예전 카페(안쪽 화면 iframe): 바깥 창을 새로고침해도 보던 게시판 페이지와 위치로
+- 글 보기 화면을 새로고침하면 같은 스크롤 위치로
+- 목록 화면은 건드리지 않음, 링크로 이동할 때·기능을 끈 때·확장을 끈 때는 하지 않음
+- 예전 카페(안쪽 화면 iframe): 바깥 창을 새로고침해도 보던 글을 다시 열고 같은 위치로
 """
 import asyncio, json, pathlib, sys, urllib.parse
 from playwright.async_api import async_playwright
@@ -47,7 +47,7 @@ def old_top(url):
 
 def router(url):
     u = urllib.parse.urlparse(url)
-    if "/articles/8000" in u.path:
+    if "/articles/8000" in u.path or u.path.startswith("/ArticleRead.nhn"):
         return article(url)
     if u.path == "/mycafe":
         return old_top(url)
@@ -84,71 +84,66 @@ async def frame_top_row(pg):
 
 async def main():
     async with async_playwright() as p:
-        # 1) 새로고침 → 보던 글로 (새 글 3개가 위에 올라와도)
+        # 1) 목록 화면: 확장은 위치를 맞추지 않음 (새 글이 올라오면 브라우저 기본 동작대로 밀린 글이 보임)
         b, pg, err = await open_page(p, "/f-e/cafes/111/menus/1")
         await pg.evaluate("document.querySelectorAll('a.article')[30].scrollIntoView({block: 'start'})")
         before = await pg.evaluate(TOP_ROW)
         await pg.reload()
         await pg.wait_for_timeout(3000)
         after = await pg.evaluate(TOP_ROW)
-        check("1 새로고침하면 보던 글 위치로 (새 글이 올라와도)", after == before, f"전 {before} / 후 {after}")
-        check("1 오류 없음", not err, "; ".join(err))
+        check("1 목록 화면은 건드리지 않음", after != before and not err, f"전 {before} / 후 {after} {err}")
         await b.close()
 
-        # 2) 링크로 같은 주소에 다시 들어가면 맨 위에서 시작
-        b, pg, err = await open_page(p, "/f-e/cafes/111/menus/1")
-        await pg.evaluate("document.querySelectorAll('a.article')[30].scrollIntoView({block: 'start'})")
-        await pg.evaluate("location.href = location.href")
-        await pg.wait_for_timeout(2500)
-        y = await pg.evaluate("scrollY")
-        check("2 링크로 이동할 때는 맨 위에서 시작", y == 0, f"scrollY {y}")
-        await b.close()
-
-        # 3) 기능을 끄거나 확장을 끄면 보던 글로 맞추지 않음 (브라우저 기본 동작만)
-        for name, st in (("3a 기능을 끄면 동작 안 함", {"keepScroll": False}), ("3b 확장을 끄면 동작 안 함", {"enabled": False})):
-            b, pg, err = await open_page(p, "/f-e/cafes/111/menus/1", st)
-            await pg.evaluate("document.querySelectorAll('a.article')[30].scrollIntoView({block: 'start'})")
-            before = await pg.evaluate(TOP_ROW)
-            await pg.reload()
-            await pg.wait_for_timeout(3000)
-            after = await pg.evaluate(TOP_ROW)
-            check(name, after != before, f"전 {before} / 후 {after}")
-            await b.close()
-
-        # 4) 글 보기 화면: 같은 스크롤 위치
+        # 2) 글 보기 화면: 새로고침하면 같은 위치
         b, pg, err = await open_page(p, "/f-e/cafes/111/articles/8000")
         await pg.evaluate("scrollTo(0, 1500)")
         await pg.reload()
         await pg.wait_for_timeout(3000)
         y = await pg.evaluate("scrollY")
-        check("4 글 보기 화면도 같은 위치로", abs(y - 1500) <= 2, f"scrollY {y}")
+        check("2 글 보기 화면을 새로고침하면 읽던 위치로", abs(y - 1500) <= 2 and not err, f"scrollY {y} {err}")
         await b.close()
 
-        # 5) 예전 카페: 안쪽 화면을 3쪽으로 옮긴 뒤 바깥 창 새로고침 → 3쪽, 보던 글로
+        # 3) 링크로 같은 글에 다시 들어가면 맨 위에서 시작
+        b, pg, err = await open_page(p, "/f-e/cafes/111/articles/8000")
+        await pg.evaluate("scrollTo(0, 1500)")
+        await pg.evaluate("location.href = location.href")
+        await pg.wait_for_timeout(2500)
+        y = await pg.evaluate("scrollY")
+        check("3 링크로 이동할 때는 맨 위에서 시작", y == 0, f"scrollY {y}")
+        await b.close()
+
+        # 4) 예전 카페: 안쪽 화면에서 글을 읽다가 바깥 창 새로고침 → 그 글, 같은 위치
         b, pg, err = await open_page(p, "/mycafe")
-        await pg.evaluate("document.getElementById('cafe_main').src = '/ArticleList.nhn?search.clubid=111&search.page=3'")
+        await pg.evaluate("document.getElementById('cafe_main').src = '/ArticleRead.nhn?clubid=111&articleid=8000'")
         await pg.wait_for_timeout(1200)
-        await pg.frame(name="cafe_main").evaluate("document.querySelectorAll('a.article')[25].scrollIntoView({block: 'start'})")
-        await pg.wait_for_timeout(200)
-        before = await frame_top_row(pg)
+        await pg.evaluate("scrollTo(0, 1800)")
         await pg.reload()
         await pg.wait_for_timeout(4000)
         f = pg.frame(name="cafe_main")
-        inner = urllib.parse.urlparse(f.url)
-        after = await frame_top_row(pg)
-        check("5a 예전 카페: 새로고침해도 보던 게시판 페이지(3쪽)로", "search.page=3" in inner.query, f.url)
-        check("5b 예전 카페: 보던 글 위치로 (새 글이 올라와도)", after == before, f"전 {before} / 후 {after}")
-        check("5 오류 없음", not err, "; ".join(err))
+        y = await pg.evaluate("scrollY")
+        check("4a 예전 카페: 새로고침해도 읽던 글을 다시 엶", "ArticleRead.nhn" in f.url and "articleid=8000" in f.url, f.url)
+        check("4b 예전 카페: 읽던 위치로", abs(y - 1800) <= 2, f"scrollY {y}")
+        check("4 오류 없음", not err, "; ".join(err))
         await b.close()
 
-        # 6) 예전 카페에서 기능을 끄면 안쪽 화면은 카페 첫 화면(1쪽)으로 (원래 네이버 동작)
-        b, pg, err = await open_page(p, "/mycafe", {"keepScroll": False})
+        # 5) 예전 카페: 안쪽 화면이 목록이면 건드리지 않음 (네이버 원래 동작대로 카페 첫 화면)
+        b, pg, err = await open_page(p, "/mycafe")
         await pg.evaluate("document.getElementById('cafe_main').src = '/ArticleList.nhn?search.clubid=111&search.page=3'")
         await pg.wait_for_timeout(1200)
         await pg.reload()
         await pg.wait_for_timeout(2500)
-        check("6 기능을 끄면 예전 카페는 원래대로 첫 화면", "search.page=1" in pg.frame(name="cafe_main").url, pg.frame(name="cafe_main").url)
+        check("5 예전 카페: 목록은 건드리지 않음", "search.page=1" in pg.frame(name="cafe_main").url, pg.frame(name="cafe_main").url)
         await b.close()
+
+        # 6) 기능을 끄거나 확장을 끄면 예전 카페에서 글을 다시 열지 않음
+        for name, st in (("6a 기능을 끄면 동작 안 함", {"keepScroll": False}), ("6b 확장을 끄면 동작 안 함", {"enabled": False})):
+            b, pg, err = await open_page(p, "/mycafe", st)
+            await pg.evaluate("document.getElementById('cafe_main').src = '/ArticleRead.nhn?clubid=111&articleid=8000'")
+            await pg.wait_for_timeout(1200)
+            await pg.reload()
+            await pg.wait_for_timeout(2500)
+            check(name, "search.page=1" in pg.frame(name="cafe_main").url, pg.frame(name="cafe_main").url)
+            await b.close()
 
         # 7) 팝업 옵션
         b = await p.chromium.launch()
