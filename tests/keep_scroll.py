@@ -40,6 +40,14 @@ def article(url):
     return f"""<!doctype html><html><head><meta charset="utf-8"></head><body><div class="ArticleContentBox"><h3>글 8000</h3>{paras}</div></body></html>"""
 
 
+def article_slow(url):
+    # 처음엔 짧고 1.2초 뒤에 본문이 다 뜨는 글 (사진이 늦게 뜨는 경우)
+    paras = "".join(f"<p style='height:60px'>본문 {i}</p>" for i in range(8))
+    more = "".join(f"<p style='height:60px'>본문 {i}</p>" for i in range(8, 60))
+    return f"""<!doctype html><html><head><meta charset="utf-8"></head><body><div class="ArticleContentBox"><h3>글 8001</h3>{paras}<div id="more"></div></div>
+<script>setTimeout(() => document.getElementById('more').innerHTML = {json.dumps(more)}, 1200);</script></body></html>"""
+
+
 def old_top(url):
     return """<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">
 <div style="height:60px">카페 메뉴</div><iframe id="cafe_main" name="cafe_main" src="/ArticleList.nhn?search.clubid=111&search.page=1" style="width:800px;height:4200px;border:0"></iframe></body></html>"""
@@ -47,6 +55,8 @@ def old_top(url):
 
 def router(url):
     u = urllib.parse.urlparse(url)
+    if "/articles/8001" in u.path or "articleid=8001" in u.query:
+        return article_slow(url)
     if "/articles/8000" in u.path or u.path.startswith("/ArticleRead.nhn"):
         return article(url)
     if u.path == "/mycafe":
@@ -144,6 +154,56 @@ async def main():
             await pg.wait_for_timeout(2500)
             check(name, "search.page=1" in pg.frame(name="cafe_main").url, pg.frame(name="cafe_main").url)
             await b.close()
+
+        # 8) 위치로 간 뒤 바로 직접 스크롤하면 다시 끌려가지 않음 (처음 한 번만)
+        b, pg, err = await open_page(p, "/f-e/cafes/111/articles/8000")
+        await pg.evaluate("scrollTo(0, 1500)")
+        await pg.reload()
+        await pg.wait_for_timeout(150)
+        await pg.mouse.move(400, 300)
+        await pg.mouse.wheel(0, -900)
+        await pg.wait_for_timeout(300)
+        y1 = await pg.evaluate("scrollY")
+        await pg.wait_for_timeout(3000)
+        y2 = await pg.evaluate("scrollY")
+        check("8 위치로 간 뒤 바로 스크롤하면 그대로 (다시 안 끌려감)", y1 < 1000 and abs(y2 - y1) <= 2, f"스크롤 직후 {y1}, 3초 뒤 {y2}")
+        await b.close()
+
+        # 9) 글이 늦게 떠서 아직 못 갔을 때 사용자가 스크롤하면 멈춤
+        b, pg, err = await open_page(p, "/f-e/cafes/111/articles/8001")
+        await pg.wait_for_timeout(1500)
+        await pg.evaluate("scrollTo(0, 2000)")
+        await pg.reload()
+        await pg.wait_for_timeout(400)
+        await pg.mouse.move(400, 300)
+        await pg.mouse.wheel(0, 120)
+        await pg.wait_for_timeout(2500)
+        y = await pg.evaluate("scrollY")
+        check("9 늦게 뜨는 글: 그 사이 스크롤하면 끌려가지 않음", y < 1000, f"scrollY {y}")
+        await b.close()
+
+        # 10) 글이 늦게 떠도 가만히 있으면 다 뜬 뒤 그 위치로
+        b, pg, err = await open_page(p, "/f-e/cafes/111/articles/8001")
+        await pg.wait_for_timeout(1500)
+        await pg.evaluate("scrollTo(0, 2000)")
+        await pg.reload()
+        await pg.wait_for_timeout(3000)
+        y = await pg.evaluate("scrollY")
+        check("10 늦게 뜨는 글: 다 뜬 뒤 읽던 위치로", abs(y - 2000) <= 2, f"scrollY {y}")
+        await b.close()
+
+        # 11) 예전 카페: 바깥 창 위에서 스크롤해도(안쪽 화면 밖) 끌려가지 않음
+        b, pg, err = await open_page(p, "/mycafe")
+        await pg.evaluate("document.getElementById('cafe_main').src = '/ArticleRead.nhn?clubid=111&articleid=8000'")
+        await pg.wait_for_timeout(1200)
+        await pg.evaluate("scrollTo(0, 1800)")
+        await pg.reload()
+        await pg.wait_for_timeout(1200)
+        await pg.evaluate("scrollTo(0, 300)")   # 스크롤바를 끌어 옮긴 것처럼 (입력 이벤트 없이 위치만 바뀜)
+        await pg.wait_for_timeout(3000)
+        y = await pg.evaluate("scrollY")
+        check("11 예전 카페: 스크롤바로 옮겨도 끌려가지 않음", abs(y - 300) <= 2, f"scrollY {y}")
+        await b.close()
 
         # 7) 팝업 옵션
         b = await p.chromium.launch()

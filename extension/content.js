@@ -1763,12 +1763,39 @@
     return saved && Date.now() - saved.at < 60 * 1000 ? saved : null;
   }
 
+  // 한 번만 맞춤: 목표 위치에 닿으면 끝. 아직 글이 덜 떠서 닿을 수 없으면 닿을 때까지만 잠깐(최대 3초) 다시 시도.
+  // 그 사이 사용자가 직접 스크롤하면(휠·키보드·터치·스크롤바, 안쪽·바깥 창 모두) 바로 멈춤.
   function applyPlace(saved) {
-    let userMoved = false;
-    const stop = () => { userMoved = true; };
-    ["wheel", "keydown", "touchstart", "mousedown"].forEach((ev) => window.addEventListener(ev, stop, { capture: true, passive: true, once: true }));
-    // 사진 등이 늦게 떠서 높이가 바뀌므로 몇 번 다시 맞춤
-    [0, 400, 1200, 2500].forEach((ms) => setTimeout(() => { if (!userMoved) scrollWin().scrollTo(0, saved.y); }, ms));
+    const win = scrollWin();
+    const wins = win === window ? [window] : [window, win];
+    let done = false;
+    let expected = null;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      wins.forEach((w) => {
+        ["wheel", "keydown", "touchstart", "mousedown"].forEach((ev) => w.removeEventListener(ev, finish, true));
+        w.removeEventListener("scroll", onScroll, true);
+      });
+    };
+    // 목표에서 더 멀어지는 쪽으로 스크롤되면 사용자가 움직인 것
+    // (브라우저 자체의 새로고침 위치 복원은 목표 쪽으로 움직이므로 무시)
+    const onScroll = () => {
+      if (expected !== null && Math.abs(win.scrollY - saved.y) > Math.abs(expected - saved.y) + 3) finish();
+    };
+    wins.forEach((w) => {
+      ["wheel", "keydown", "touchstart", "mousedown"].forEach((ev) => w.addEventListener(ev, finish, { capture: true, passive: true }));
+      w.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    });
+    const started = Date.now();
+    const tryOnce = () => {
+      if (done) return;
+      win.scrollTo(0, saved.y);
+      expected = win.scrollY;
+      if (Math.abs(win.scrollY - saved.y) <= 2 || Date.now() - started > 3000) { finish(); return; }
+      setTimeout(tryOnce, 200);
+    };
+    tryOnce();
   }
 
   function restorePlace() {
