@@ -48,6 +48,18 @@ def article_slow(url):
 <script>setTimeout(() => document.getElementById('more').innerHTML = {json.dumps(more)}, 1200);</script></body></html>"""
 
 
+def article_jumpy(url):
+    # 네이버처럼 글이 뜬 뒤 스크립트가 화면을 맨 위로 올리는 글
+    paras = "".join(f"<p style='height:60px'>본문 {i}</p>" for i in range(60))
+    return f"""<!doctype html><html><head><meta charset="utf-8"></head><body><div class="ArticleContentBox"><h3>글 8002</h3>{paras}</div>
+<script>setTimeout(() => scrollTo(0, 0), 300); setTimeout(() => scrollTo(0, 0), 900);</script></body></html>"""
+
+
+def old_top_jumpy(url):
+    # 예전 카페: 안쪽 화면이 뜨면 바깥 창을 맨 위로 올림
+    return old_top(url).replace('<iframe id="cafe_main"', '<iframe onload="setTimeout(() => scrollTo(0, 0), 200)" id="cafe_main"')
+
+
 def old_top(url):
     return """<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">
 <div style="height:60px">카페 메뉴</div><iframe id="cafe_main" name="cafe_main" src="/ArticleList.nhn?search.clubid=111&search.page=1" style="width:800px;height:4200px;border:0"></iframe></body></html>"""
@@ -55,6 +67,10 @@ def old_top(url):
 
 def router(url):
     u = urllib.parse.urlparse(url)
+    if "/articles/8002" in u.path:
+        return article_jumpy(url)
+    if u.path == "/mycafe2":
+        return old_top_jumpy(url)
     if "/articles/8001" in u.path or "articleid=8001" in u.query:
         return article_slow(url)
     if "/articles/8000" in u.path or u.path.startswith("/ArticleRead.nhn"):
@@ -199,10 +215,32 @@ async def main():
         await pg.evaluate("scrollTo(0, 1800)")
         await pg.reload()
         await pg.wait_for_timeout(1200)
-        await pg.evaluate("scrollTo(0, 300)")   # 스크롤바를 끌어 옮긴 것처럼 (입력 이벤트 없이 위치만 바뀜)
+        # 바깥 창 스크롤바를 끌어 옮김: 스크롤바를 누르면 바깥 창에 mousedown이 오고 위치가 바뀜
+        await pg.evaluate("document.documentElement.dispatchEvent(new MouseEvent('mousedown', {bubbles: true})); scrollTo(0, 300)")
         await pg.wait_for_timeout(3000)
         y = await pg.evaluate("scrollY")
         check("11 예전 카페: 스크롤바로 옮겨도 끌려가지 않음", abs(y - 300) <= 2, f"scrollY {y}")
+        await b.close()
+
+        # 12) 네이버가 글을 띄운 뒤 화면을 맨 위로 올려도 읽던 위치로
+        b, pg, err = await open_page(p, "/f-e/cafes/111/articles/8002")
+        await pg.wait_for_timeout(1200)
+        await pg.evaluate("scrollTo(0, 1500)")
+        await pg.reload()
+        await pg.wait_for_timeout(3500)
+        y = await pg.evaluate("scrollY")
+        check("12 네이버가 화면을 맨 위로 올려도 읽던 위치로", abs(y - 1500) <= 2, f"scrollY {y}")
+        await b.close()
+
+        # 13) 예전 카페: 안쪽 화면이 뜰 때 바깥 창을 맨 위로 올려도 읽던 위치로
+        b, pg, err = await open_page(p, "/mycafe2")
+        await pg.evaluate("document.getElementById('cafe_main').src = '/ArticleRead.nhn?clubid=111&articleid=8000'")
+        await pg.wait_for_timeout(1500)
+        await pg.evaluate("scrollTo(0, 1800)")
+        await pg.reload()
+        await pg.wait_for_timeout(4500)
+        y = await pg.evaluate("scrollY")
+        check("13 예전 카페: 바깥 창을 맨 위로 올려도 읽던 위치로", abs(y - 1800) <= 2 and "articleid=8000" in pg.frame(name="cafe_main").url, f"scrollY {y}")
         await b.close()
 
         # 7) 팝업 옵션

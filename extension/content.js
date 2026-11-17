@@ -1763,39 +1763,28 @@
     return saved && Date.now() - saved.at < 60 * 1000 ? saved : null;
   }
 
-  // 한 번만 맞춤: 목표 위치에 닿으면 끝. 아직 글이 덜 떠서 닿을 수 없으면 닿을 때까지만 잠깐(최대 3초) 다시 시도.
-  // 그 사이 사용자가 직접 스크롤하면(휠·키보드·터치·스크롤바, 안쪽·바깥 창 모두) 바로 멈춤.
+  // 새로고침 직후 3초 동안 읽던 위치를 지킴 (글이 늦게 뜨거나, 네이버가 화면을 맨 위로 올려도 다시 맞춤).
+  // 그 사이 사용자가 직접 움직이면(휠·키보드·터치·클릭·스크롤바 끌기, 안쪽·바깥 창 모두) 바로 멈추고 다시 끌어오지 않음.
+  // 스크롤 위치 변화만으로는 판단하지 않음: 네이버 스크립트가 옮긴 것과 구분할 수 없기 때문
   function applyPlace(saved) {
     const win = scrollWin();
     const wins = win === window ? [window] : [window, win];
+    const INPUTS = ["wheel", "keydown", "touchstart", "mousedown", "pointerdown"];
     let done = false;
-    let expected = null;
     const finish = () => {
       if (done) return;
       done = true;
-      wins.forEach((w) => {
-        ["wheel", "keydown", "touchstart", "mousedown"].forEach((ev) => w.removeEventListener(ev, finish, true));
-        w.removeEventListener("scroll", onScroll, true);
-      });
+      wins.forEach((w) => INPUTS.forEach((ev) => w.removeEventListener(ev, finish, true)));
     };
-    // 목표에서 더 멀어지는 쪽으로 스크롤되면 사용자가 움직인 것
-    // (브라우저 자체의 새로고침 위치 복원은 목표 쪽으로 움직이므로 무시)
-    const onScroll = () => {
-      if (expected !== null && Math.abs(win.scrollY - saved.y) > Math.abs(expected - saved.y) + 3) finish();
-    };
-    wins.forEach((w) => {
-      ["wheel", "keydown", "touchstart", "mousedown"].forEach((ev) => w.addEventListener(ev, finish, { capture: true, passive: true }));
-      w.addEventListener("scroll", onScroll, { capture: true, passive: true });
-    });
+    wins.forEach((w) => INPUTS.forEach((ev) => w.addEventListener(ev, finish, { capture: true, passive: true })));
     const started = Date.now();
-    const tryOnce = () => {
+    const keep = () => {
       if (done) return;
-      win.scrollTo(0, saved.y);
-      expected = win.scrollY;
-      if (Math.abs(win.scrollY - saved.y) <= 2 || Date.now() - started > 3000) { finish(); return; }
-      setTimeout(tryOnce, 200);
+      if (Math.abs(win.scrollY - saved.y) > 2) win.scrollTo(0, saved.y);
+      if (Date.now() - started > 3000) { finish(); return; }
+      setTimeout(keep, 150);
     };
-    tryOnce();
+    keep();
   }
 
   function restorePlace() {
