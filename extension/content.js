@@ -1725,6 +1725,20 @@
     });
   }
 
+  // 진단: 새로고침 키를 어느 화면이 받았는지, 어느 화면이 닫히는지 (진단용 빌드만)
+  if (DIAG_BUILD) {
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && /^r$/i.test(e.key))) {
+        diag("새로고침 키 받음", { 키: (e.ctrlKey ? "Ctrl+" : "") + (e.shiftKey ? "Shift+" : "") + e.key, 반복: e.repeat, 포커스있음: document.hasFocus(),
+          포커스요소: document.activeElement ? document.activeElement.tagName + (document.activeElement.id ? "#" + document.activeElement.id : "") : null,
+          이미막힘: e.defaultPrevented });
+        setTimeout(() => diag("새로고침 키 처리 뒤", { 네이버가막음: e.defaultPrevented }), 0);
+      }
+    }, true);
+    window.addEventListener("pagehide", () => diag("화면 닫힘", { url: location.pathname + location.search }), true);
+    window.addEventListener("focus", () => diag("이 화면에 포커스"), true);
+  }
+
   const PLACE_KEY = "ncl-place:";
   const INNER_KEY = "ncl-place-inner";   // 바깥 창 새로고침 뒤 다시 열 안쪽 화면(글) 주소
 
