@@ -1954,6 +1954,23 @@
     if (enabled && keepScroll) savePlace();
   });
 
+  // 예전 카페(안쪽 화면 iframe): F5·Ctrl+R을 누르면 안쪽 화면만 새로고침 (네이버 원래 동작과 같게).
+  // 바깥 창에 포커스가 있으면 브라우저가 전체를 새로고침해 카페 첫 화면으로 돌아가므로 확장이 대신 처리.
+  // Ctrl+Shift+R(강력 새로고침)과 브라우저의 새로고침 버튼은 그대로 둠.
+  if (window === window.top) {
+    window.addEventListener("keydown", (e) => {
+      if (!enabled || e.defaultPrevented || e.shiftKey || e.altKey) return;
+      const isReloadKey = e.key === "F5" || ((e.ctrlKey || e.metaKey) && /^r$/i.test(e.key));
+      if (!isReloadKey) return;
+      const f = innerFrame();
+      if (!f || f.contentWindow.location.href === "about:blank") return;
+      e.preventDefault();
+      if (e.repeat) return;
+      diag("F5: 안쪽 화면만 새로고침", { url: f.contentWindow.location.pathname + f.contentWindow.location.search });
+      try { f.contentWindow.location.reload(); } catch (err) { location.reload(); }
+    }, true);
+  }
+
   // ---------- 페이지 변화 감시 ----------
   // 새 링크가 화면에 추가될 때만, 다음 화면 그리기 직전에 한 번 목록 표시
   let rafPending = false;
