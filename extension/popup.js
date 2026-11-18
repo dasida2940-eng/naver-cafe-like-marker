@@ -180,3 +180,22 @@ function refreshJump() {
 
 refresh();
 refreshJump();
+
+// ---------- 진단 기록 (진단용 테스트 빌드에서만 보임) ----------
+const DIAG_BUILD = false;
+if (DIAG_BUILD) {
+  document.getElementById("diag").style.display = "block";
+  const dmsg = document.getElementById("dmsg");
+  document.getElementById("dcopy").addEventListener("click", () => {
+    ask("get", {}, (res) => {
+      const text = res && res.lines && res.lines.length ? res.lines.join("\n") : "";
+      if (!text) { dmsg.textContent = "기록이 없어요. 카페 탭에서 다시 열어 주세요."; return; }
+      navigator.clipboard.writeText(text).then(
+        () => { dmsg.textContent = `${res.lines.length}줄을 복사했어요. 대화창에 붙여 넣어 주세요.`; },
+        () => { dmsg.textContent = "복사하지 못했어요."; });
+    }, "ncl-diag");
+  });
+  document.getElementById("dclear").addEventListener("click", () => {
+    ask("clear", {}, () => { dmsg.textContent = "지웠어요. 이제 문제를 다시 일으켜 보세요."; }, "ncl-diag");
+  });
+}

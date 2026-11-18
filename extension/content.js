@@ -1700,6 +1700,31 @@
   // 링크로 다른 페이지에 갈 때는 동작하지 않음. 팝업에서 끌 수 있음.
   // 예전 카페(안쪽 화면 iframe)는 바깥 창을 새로고침하면 안쪽 화면이 카페 첫 화면으로 돌아가므로,
   // 보던 글이었으면 그 글을 다시 열고 위치를 맞춤
+  // 진단 기록: 진단용 테스트 빌드에서만 켜짐 (스토어 빌드는 false). 이 사이트의 localStorage에 최근 300줄
+  const DIAG_BUILD = false;
+  const DIAG_KEY = "ncl-diag";
+  function diag(what, data) {
+    if (!DIAG_BUILD) return;
+    try {
+      const list = JSON.parse(localStorage.getItem(DIAG_KEY) || "[]");
+      const d = new Date();
+      const time = d.toTimeString().slice(0, 8) + "." + String(d.getMilliseconds()).padStart(3, "0");
+      list.push(`${time} [${window === window.top ? "바깥" : "안쪽"}] ${what}${data ? " " + JSON.stringify(data) : ""}`);
+      localStorage.setItem(DIAG_KEY, JSON.stringify(list.slice(-300)));
+    } catch (e) {}
+  }
+  function navTypeName() {
+    try { const n = performance.getEntriesByType("navigation")[0]; return n ? n.type : String(performance.navigation.type); } catch (e) { return "?"; }
+  }
+  if (chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (!msg || msg.type !== "ncl-diag" || !DIAG_BUILD) return false;
+      if (msg.action === "clear") { try { localStorage.removeItem(DIAG_KEY); } catch (e) {} sendResponse({ ok: true }); }
+      else { let list = []; try { list = JSON.parse(localStorage.getItem(DIAG_KEY) || "[]"); } catch (e) {} sendResponse({ lines: list }); }
+      return false;
+    });
+  }
+
   const PLACE_KEY = "ncl-place:";
   const INNER_KEY = "ncl-place-inner";   // 바깥 창 새로고침 뒤 다시 열 안쪽 화면(글) 주소
 
@@ -1785,12 +1810,15 @@
         const loc = f.contentWindow.location;
         if (isArticleUrl(loc.href)) sessionStorage.setItem(INNER_KEY, JSON.stringify({ top: placeKey(), url: loc.pathname + loc.search, at: Date.now() }));
         else sessionStorage.removeItem(INNER_KEY);
+        diag("저장(바깥): 안쪽 화면", { url: loc.pathname + loc.search, 글: isArticleUrl(loc.href), y: scrollWin().scrollY });
         return;
       }
-      if (!isArticleUrl(location.href)) return;
+      if (!isArticleUrl(location.href)) { diag("저장 안 함: 글 화면 아님", { url: location.pathname + location.search }); return; }
       let dy = 0;
       try { if (window !== window.top && window.frameElement) dy = window.frameElement.getBoundingClientRect().top; } catch (e) {}
-      sessionStorage.setItem(placeKey(), JSON.stringify({ y: scrollWin().scrollY, anchor: topBlock(dy), at: Date.now() }));
+      const anchor = topBlock(dy);
+      sessionStorage.setItem(placeKey(), JSON.stringify({ y: scrollWin().scrollY, anchor, at: Date.now() }));
+      diag("저장", { url: location.pathname + location.search, y: scrollWin().scrollY, 기준: anchor ? `${anchor.i}번 ${anchor.tag} "${anchor.text}" ${anchor.src}` : "본문 못 찾음", 본문덩어리수: bodyBlocks().length });
     } catch (e) {}
   }
 
@@ -1817,28 +1845,39 @@
     let done = false;
     const onInput = (e) => {
       if (e.type === "keydown" && (e.repeat || !SCROLL_KEYS.has(e.key) || e.ctrlKey || e.metaKey || e.altKey)) return;
-      finish();
+      finish("사용자 조작: " + e.type + (e.key ? " " + e.key : ""));
     };
-    const finish = () => {
+    const finish = (why) => {
       if (done) return;
       done = true;
+      diag("맞추기 끝", { 이유: why, y: win.scrollY, 걸린시간ms: Date.now() - started });
       wins.forEach((w) => INPUTS.forEach((ev) => w.removeEventListener(ev, onInput, true)));
     };
     wins.forEach((w) => INPUTS.forEach((ev) => w.addEventListener(ev, onInput, { capture: true, passive: true })));
     const started = Date.now();
-    let lastH = -1, stableSince = Date.now();
-    const docH = (d) => { try { const e = d && (d.scrollingElement || d.documentElement); return e ? e.scrollHeight : 0; } catch (e) { return 0; } };
-    const height = () => Math.max(docH(document), win === window ? 0 : docH(win.document));
+    let lastH = -1, stableSince = Date.now(), lastNoEl = null;
+    diag("맞추기 시작", { 목표y: saved.y, 기준: saved.anchor ? `${saved.anchor.i}번 "${saved.anchor.text}"` : "없음", 지금y: win.scrollY });
+    // 확장이 아닌 쪽(네이버 등)이 스크롤을 옮기는지 기록
+    let ours = win.scrollY;
+    const watch = () => { if (!done && Math.abs(win.scrollY - ours) > 30) diag("다른 쪽이 스크롤 옮김", { y: win.scrollY }); ours = win.scrollY; };
+    if (DIAG_BUILD) win.addEventListener("scroll", watch, { passive: true });
+    // 내용의 실제 높이 (틀이 내용보다 커도 사진이 뜨며 늘어나는 걸 알 수 있게 body 높이)
+    const docH = (d) => { try { return d && d.body ? Math.round(d.body.getBoundingClientRect().height) : 0; } catch (e) { return 0; } };
+    // 안쪽 화면(사진이 뜨는 곳)과 바깥 창 높이를 둘 다 봄 (한쪽만 보면 안쪽 변화를 놓침)
+    const height = () => docH(document) + (win === window ? 0 : docH(win.document) * 100000);
     const align = () => {
       let dy = 0;
       try { if (window !== window.top && window.frameElement) dy = window.frameElement.getBoundingClientRect().top; } catch (e) {}
       const el = saved.anchor && findBlock(saved.anchor);
+      const before = win.scrollY;
       if (el) {
         const diff = el.getBoundingClientRect().top + dy - saved.anchor.top;
         if (Math.abs(diff) > 2) win.scrollBy(0, diff);
       } else if (Math.abs(win.scrollY - saved.y) > 2) {
         win.scrollTo(0, saved.y);
       }
+      if (win.scrollY !== before || !el !== lastNoEl) diag("맞춤", { 기준찾음: !!el, 전: before, 후: win.scrollY, 목표y: saved.y, 높이: height() });
+      lastNoEl = !el;
     };
     const keep = () => {
       if (done) return;
@@ -1846,13 +1885,16 @@
       const h = height();
       if (h !== lastH) { lastH = h; stableSince = Date.now(); }
       const now = Date.now();
-      if ((now - started > 3000 && now - stableSince > 1500) || now - started > 15000) { finish(); return; }
+      if (now - started > 15000) { finish("15초 지남"); return; }
+      if (now - started > 3000 && now - stableSince > 1500) { finish("높이가 1.5초 동안 그대로"); return; }
+      ours = win.scrollY;
       setTimeout(keep, 150);
     };
     keep();
   }
 
   function restorePlace() {
+    diag("화면 열림", { url: location.pathname + location.search, 열린방식: navTypeName(), 확장켜짐: enabled, 위치유지켜짐: keepScroll, 글화면: isArticleUrl(location.href) });
     if (!enabled || !keepScroll) return;
     let inner = null;
     try { inner = JSON.parse(sessionStorage.getItem(INNER_KEY) || "null"); } catch (e) {}
@@ -1863,13 +1905,13 @@
       if (!isArticleUrl(location.href)) return;
       const reopened = inner && inner.reopened && inner.url === location.pathname + location.search;
       if (reopened) { try { sessionStorage.removeItem(INNER_KEY); } catch (e) {} }
-      if (!reopened && !isReload()) return;
+      if (!reopened && !isReload()) { diag("안 맞춤: 새로고침이 아님"); return; }
       const saved = readPlace();
-      if (saved) applyPlace(saved);
+      if (saved) applyPlace(saved); else diag("안 맞춤: 저장된 위치 없음(또는 1분 지남)");
       return;
     }
 
-    if (!isReload()) return;
+    if (!isReload()) { diag("안 맞춤: 새로고침이 아님"); return; }
     // 바깥 창(예전 카페): 보던 글이 있었으면 안쪽 화면에 다시 엶
     if (inner && inner.top === placeKey()) {
       const reopen = () => {
@@ -1879,6 +1921,7 @@
         let now = "";
         try { now = f.contentWindow.location.pathname + f.contentWindow.location.search; } catch (e) {}
         if (now !== inner.url) f.src = inner.url;
+        diag("예전 카페: 읽던 글 다시 엶", { 지금: now, 열글: inner.url });
         return true;
       };
       if (!reopen()) {
@@ -1888,9 +1931,9 @@
       return;
     }
     // 새 방식 카페의 글 보기 화면
-    if (!isArticleUrl(location.href)) return;
+    if (!isArticleUrl(location.href)) { diag("안 맞춤: 글 화면 아님"); return; }
     const saved = readPlace();
-    if (saved) applyPlace(saved);
+    if (saved) applyPlace(saved); else diag("안 맞춤: 저장된 위치 없음(또는 1분 지남)");
   }
 
   window.addEventListener("pagehide", () => {
