@@ -80,6 +80,7 @@ python3 tests/scenarios.py extension   # 좋아요/취소, 설정 변경, 페이
 python3 tests/liked_import.py extension # 좋아요한 글 목록에서 가져오기 (한 화면형·새로고침형·색으로만 선택 표시)
 python3 tests/jump_onoff.py extension   # 최근 좋아요한 글로 이동, 켜기/끄기
 python3 tests/keep_scroll.py extension   # 새로고침해도 읽던 위치 유지 (글 보기 화면만)
+python3 tests/many_likes.py extension    # 좋아요 2만 개일 때 속도
 python3 tests/hidden_content.py extension # 제목 길이를 바꿔 가며 아이콘·댓글 수가 하트에 가려지지 않는지
 python3 tests/row_widths.py extension   # "좋아요한 글" 한 줄을 칸 폭별로 그려 겹침 확인
 ```

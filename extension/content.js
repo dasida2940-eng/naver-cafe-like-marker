@@ -1223,17 +1223,30 @@
     return 1;
   }
 
+  // 페이지 번호 줄의 글자 버튼 (처음·이전·다음). "이전 글·다음 글" 버튼은 제외
+  const PAGER_WORDS = {
+    first: /(^|\s|[-_])(처음|맨\s?앞|first)($|\s|[-_])/i,
+    prev: /(^|\s|[-_])(이전|prev)($|\s|[-_]|\s?페이지)/i,
+    next: /(^|\s|[-_])(다음|next)($|\s|[-_]|\s?페이지)/i
+  };
+  function pagerButton(btns, kind) {
+    return btns.find((b) => {
+      const label = norm(b.textContent) + " " + (b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "") + " " + b.className;
+      return PAGER_WORDS[kind].test(label) && !/(이전|다음)\s?글/.test(label);
+    }) || null;
+  }
+  // 1쪽으로 가는 버튼: "1" → "처음" → "이전"
+  function firstPageButton(info) {
+    return info.nums.find((b) => norm(b.textContent) === "1") || pagerButton(info.btns, "first") || pagerButton(info.btns, "prev");
+  }
+
   // 1쪽으로 돌아가기 (다른 페이지를 보던 중에 눌러도 처음부터 읽도록)
   async function goToFirstPage(tab) {
     for (let i = 0; i < 500; i++) {
       const { scope, items } = listLinks(tab);
-      const { btns, nums, curNo } = pagerInfo(scope, tab);
-      if (curNo <= 1) return tab;
-      const one = nums.find((b) => norm(b.textContent) === "1");
-      const back =
-        one ||
-        btns.find((b) => /(^|\s|[-_])(처음|맨\s?앞|first)($|\s|[-_])/i.test(norm(b.textContent) + " " + (b.getAttribute("aria-label") || "") + " " + b.className)) ||
-        btns.find((b) => /(^|\s|[-_])(이전|prev)($|\s|[-_]|\s?페이지)/i.test(norm(b.textContent) + " " + (b.getAttribute("aria-label") || "") + " " + b.className) && !/이전\s?글/.test(norm(b.textContent)));
+      const info = pagerInfo(scope, tab);
+      if (info.curNo <= 1) return tab;
+      const back = firstPageButton(info);
       if (!back) return tab;
       const before = items.map((x) => x.a).join(",");
       writeSessionFirst();
@@ -1260,13 +1273,7 @@
     if (total && curNo >= total) return null; // 마지막 페이지
     const next = nums.find((b) => +norm(b.textContent) === curNo + 1);
     if (next) return next;
-    // 번호 묶음의 끝이면 "다음" 버튼
-    return (
-      btns.find((b) => {
-        const label = norm(b.textContent) + " " + (b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "") + " " + b.className;
-        return /(^|\s|[-_])(다음|next)($|\s|[-_]|\s?페이지)/i.test(label) && !/다음\s?글/.test(label);
-      }) || null
-    );
+    return pagerButton(btns, "next"); // 번호 묶음의 끝이면 "다음" 버튼
   }
 
   // 좋아요한 글 목록은 맨 위가 가장 최근에 누른 좋아요 → 목록 순서대로 시각을 매김
@@ -1608,10 +1615,7 @@
         if (s.phase === "first") {
           setJumpStatus({ state: "running", pages: s.pages, page: cur });
           if (cur > 1) {
-            const back =
-              info.nums.find((b) => norm(b.textContent) === "1") ||
-              info.btns.find((b) => /(^|\s|[-_])(처음|맨\s?앞|first)($|\s|[-_])/i.test(norm(b.textContent) + " " + (b.getAttribute("aria-label") || "") + " " + b.className)) ||
-              info.btns.find((b) => /(^|\s|[-_])(이전|prev)($|\s|[-_]|\s?페이지)/i.test(norm(b.textContent) + " " + (b.getAttribute("aria-label") || "") + " " + b.className) && !/이전\s?글/.test(norm(b.textContent)));
+            const back = firstPageButton(info);
             if (back && (await clickAndWait(back, s))) continue;
           }
           s.phase = "scan";
@@ -1662,14 +1666,7 @@
           }
           setJumpStatus({ state: "running", pages: s.pages, page: cur });
           const nums = info.nums.map((b) => +norm(b.textContent));
-          let btn = info.nums.find((b) => +norm(b.textContent) === want);
-          if (!btn) {
-            const re = want < Math.min(...nums, cur) ? /(^|\s|[-_])(이전|prev)($|\s|[-_]|\s?페이지)/i : /(^|\s|[-_])(다음|next)($|\s|[-_]|\s?페이지)/i;
-            btn = info.btns.find((b) => {
-              const label = norm(b.textContent) + " " + (b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "") + " " + b.className;
-              return re.test(label) && !/(이전|다음)\s?글/.test(label);
-            });
-          }
+          const btn = info.nums.find((b) => +norm(b.textContent) === want) || pagerButton(info.btns, want < Math.min(...nums, cur) ? "prev" : "next");
           if (!btn || !(await clickAndWait(btn, s))) { setJumpStatus({ state: "interrupted", pages: s.pages }); break; }
           continue;
         }
@@ -1758,6 +1755,12 @@
     return !!(r && r.a);
   }
 
+  // 안쪽 화면(iframe)이면 바깥 창 화면에서 이 화면이 시작하는 높이, 아니면 0
+  function frameTop() {
+    try { if (window !== window.top && window.frameElement) return window.frameElement.getBoundingClientRect().top; } catch (e) {}
+    return 0;
+  }
+
   // 스크롤되는 창: 예전 카페(안쪽 화면 iframe)는 바깥 창이 스크롤됨
   function scrollWin() {
     try {
@@ -1828,9 +1831,7 @@
         return;
       }
       if (!isArticleUrl(location.href)) { diag("저장 안 함: 글 화면 아님", { url: location.pathname + location.search }); return; }
-      let dy = 0;
-      try { if (window !== window.top && window.frameElement) dy = window.frameElement.getBoundingClientRect().top; } catch (e) {}
-      const anchor = topBlock(dy);
+      const anchor = topBlock(frameTop());
       sessionStorage.setItem(placeKey(), JSON.stringify({ y: scrollWin().scrollY, anchor, at: Date.now() }));
       diag("저장", { url: location.pathname + location.search, y: scrollWin().scrollY, 기준: anchor ? `${anchor.i}번 ${anchor.tag} "${anchor.text}" ${anchor.src}` : "본문 못 찾음", 본문덩어리수: bodyBlocks().length });
     } catch (e) {}
@@ -1880,8 +1881,7 @@
     // 안쪽 화면(사진이 뜨는 곳)과 바깥 창 높이를 둘 다 봄 (한쪽만 보면 안쪽 변화를 놓침)
     const height = () => docH(document) + (win === window ? 0 : docH(win.document) * 100000);
     const align = () => {
-      let dy = 0;
-      try { if (window !== window.top && window.frameElement) dy = window.frameElement.getBoundingClientRect().top; } catch (e) {}
+      const dy = frameTop();
       const el = saved.anchor && findBlock(saved.anchor);
       const before = win.scrollY;
       if (el) {

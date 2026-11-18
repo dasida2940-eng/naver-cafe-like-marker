@@ -345,6 +345,64 @@ async def main():
         check("17e 새 방식 카페(안쪽 화면 없음)는 F5를 건드리지 않음", prevented is False)
         await b.close()
 
+        # 18) 예전 카페 메인/목록에서 F5 → 안쪽 화면(보던 목록 3쪽)이 그대로, 바깥 창은 안 바뀜
+        b, pg, err = await open_page(p, "/mycafe")
+        await pg.evaluate("document.getElementById('cafe_main').src = '/ArticleList.nhn?search.clubid=111&search.page=3'")
+        await pg.wait_for_timeout(1000)
+        await pg.evaluate("window.__topAlive = 1")
+        for key in ("F5", "r"):
+            await pg.evaluate(f"""window.dispatchEvent(new KeyboardEvent('keydown', {{ key: '{key}', ctrlKey: {'true' if key == 'r' else 'false'}, cancelable: true }}))""")
+            await pg.wait_for_timeout(1200)
+            f = pg.frame(name="cafe_main")
+            ok = await pg.evaluate("window.__topAlive === 1") and "search.page=3" in f.url and await f.evaluate("performance.getEntriesByType('navigation')[0].type") == "reload"
+            check(f"18 예전 카페 목록에서 {'Ctrl+R' if key == 'r' else 'F5'} → 안쪽(3쪽)만 새로고침", ok, f.url)
+        await b.close()
+
+        # 19) F5를 꾹 누르고 있어도(반복 신호) 한 번만 새로고침
+        b, pg, err = await open_page(p, "/mycafe")
+        await pg.evaluate("document.getElementById('cafe_main').src = '/ArticleList.nhn?search.clubid=111&search.page=2'")
+        await pg.wait_for_timeout(1000)
+        before = loads.get("board2", 0)
+        await pg.evaluate("""(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F5', cancelable: true }));
+            for (let i = 0; i < 5; i++) window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F5', repeat: true, cancelable: true })); })()""")
+        await pg.wait_for_timeout(1500)
+        check("19 F5를 꾹 눌러도 안쪽 화면은 한 번만 새로고침", loads.get("board2", 0) - before == 1, f"{loads.get('board2', 0) - before}번")
+        await b.close()
+
+        # 20) "읽던 위치 유지"를 꺼도 F5 안쪽만 새로고침은 그대로 (확장을 끄면 원래대로)
+        b, pg, err = await open_page(p, "/mycafe", {"keepScroll": False})
+        await pg.wait_for_timeout(500)
+        prevented = await pg.evaluate("(() => { const e = new KeyboardEvent('keydown', { key: 'F5', cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; })()")
+        check("20 읽던 위치 유지를 꺼도 F5는 안쪽만", prevented is True)
+        await b.close()
+
+        # 21) 스토어 빌드는 진단 기록을 남기지 않고, 팝업에 진단 칸이 없음
+        b, pg, err = await open_page(p, "/f-e/cafes/111/articles/8000")
+        await pg.evaluate("scrollTo(0, 900)")
+        await pg.reload()
+        await pg.wait_for_timeout(1500)
+        diag = await pg.evaluate("localStorage.getItem('ncl-diag')")
+        check("21a 스토어 빌드는 진단 기록 안 남김", diag is None, str(diag)[:80])
+        await b.close()
+        b = await p.chromium.launch()
+        pg = await b.new_page()
+        await pg.add_init_script("""window.chrome = { storage: { local: { get(k, cb) { setTimeout(() => cb({})); }, set() {} } },
+          runtime: { lastError: null }, tabs: { query(q, cb) { cb([{ id: 1 }]); }, sendMessage(id, m, cb) { setTimeout(() => cb(null)); } } };""")
+        await pg.goto((EXT / "popup.html").as_uri())
+        await pg.wait_for_timeout(300)
+        check("21b 스토어 빌드 팝업에는 진단 칸 없음", not await pg.is_visible("#diag"))
+        await b.close()
+
+        # 22) 새 방식 카페: 글에서 다른 글로 옮긴 뒤 새로고침하면 지금 글 기준 (예전 글 위치를 쓰지 않음)
+        b, pg, err = await open_page(p, "/f-e/cafes/111/articles/8003")
+        await pg.mouse.wheel(0, 2500); await pg.wait_for_timeout(600)
+        await pg.goto("https://cafe.naver.com/f-e/cafes/111/articles/8000"); await pg.wait_for_timeout(600)
+        await pg.evaluate("scrollTo(0, 700)")
+        await pg.reload(); await pg.wait_for_timeout(3000)
+        y = await pg.evaluate("scrollY")
+        check("22 다른 글로 옮긴 뒤 새로고침하면 지금 글의 위치", abs(y - 700) <= 2, f"scrollY {y}")
+        await b.close()
+
         # 7) 팝업 옵션
         b = await p.chromium.launch()
         pg = await b.new_page()
