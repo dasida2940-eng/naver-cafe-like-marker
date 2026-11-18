@@ -291,6 +291,35 @@ async def main():
         check("15 예전 카페 + 사진이 많은 글: 읽던 문단으로", after == before, f"전 {before} / 후 {after}")
         await b.close()
 
+        # 16) Ctrl+Shift+R로 새로고침: 누르고 있던 Ctrl·Shift 신호가 새 화면에 와도 읽던 위치로, 이어서 일반 새로고침도
+        b, pg, err = await open_page(p, "/f-e/cafes/111/articles/8002")
+        await pg.wait_for_timeout(1200)
+        await pg.evaluate("scrollTo(0, 1500)")
+        await pg.reload()
+        await pg.wait_for_timeout(100)
+        # 새 화면에 Ctrl·Shift가 눌린 채로 반복 신호가 옴
+        await pg.evaluate("""(() => { for (let i = 0; i < 6; i++) setTimeout(() => {
+            for (const k of ['Control', 'Shift']) window.dispatchEvent(new KeyboardEvent('keydown', { key: k, ctrlKey: true, shiftKey: true, repeat: i > 0 }));
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'R', ctrlKey: true, shiftKey: true, repeat: true }));
+          }, i * 120); })()""")
+        await pg.wait_for_timeout(3500)
+        y1 = await pg.evaluate("scrollY")
+        await pg.reload()
+        await pg.wait_for_timeout(3500)
+        y2 = await pg.evaluate("scrollY")
+        check("16 Ctrl+Shift+R 뒤에도 읽던 위치로, 이어서 일반 새로고침도", abs(y1 - 1500) <= 2 and abs(y2 - 1500) <= 2, f"강력 새로고침 {y1}, 일반 새로고침 {y2}")
+        await b.close()
+        # 화면을 움직이는 키(아래 화살표)는 사용자 조작으로 보고 멈춤 (맨 위로 올리는 스크립트 없는 글)
+        b, pg, err = await open_page(p, "/f-e/cafes/111/articles/8000")
+        await pg.evaluate("scrollTo(0, 1500)")
+        await pg.reload()
+        await pg.wait_for_timeout(200)
+        await pg.evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' })); scrollTo(0, 100)")
+        await pg.wait_for_timeout(2500)
+        y3 = await pg.evaluate("scrollY")
+        check("16 화살표 키로 움직이면 멈춤", abs(y3 - 100) <= 2, f"scrollY {y3}")
+        await b.close()
+
         # 7) 팝업 옵션
         b = await p.chromium.launch()
         pg = await b.new_page()

@@ -1811,13 +1811,20 @@
     const win = scrollWin();
     const wins = win === window ? [window] : [window, win];
     const INPUTS = ["wheel", "keydown", "touchstart", "mousedown", "pointerdown"];
+    // 키보드는 실제로 화면을 움직이는 키만 사용자 조작으로 봄.
+    // Ctrl+Shift+R·F5로 새로고침할 때 누르고 있던 Ctrl·Shift 등이 새 화면에 계속 눌림 신호를 보내므로 무시
+    const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "Spacebar"]);
     let done = false;
+    const onInput = (e) => {
+      if (e.type === "keydown" && (e.repeat || !SCROLL_KEYS.has(e.key) || e.ctrlKey || e.metaKey || e.altKey)) return;
+      finish();
+    };
     const finish = () => {
       if (done) return;
       done = true;
-      wins.forEach((w) => INPUTS.forEach((ev) => w.removeEventListener(ev, finish, true)));
+      wins.forEach((w) => INPUTS.forEach((ev) => w.removeEventListener(ev, onInput, true)));
     };
-    wins.forEach((w) => INPUTS.forEach((ev) => w.addEventListener(ev, finish, { capture: true, passive: true })));
+    wins.forEach((w) => INPUTS.forEach((ev) => w.addEventListener(ev, onInput, { capture: true, passive: true })));
     const started = Date.now();
     let lastH = -1, stableSince = Date.now();
     const docH = (d) => { try { const e = d && (d.scrollingElement || d.documentElement); return e ? e.scrollHeight : 0; } catch (e) { return 0; } };
