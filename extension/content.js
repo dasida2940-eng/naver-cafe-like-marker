@@ -1739,6 +1739,44 @@
     return null;
   }
 
+  // 본문 안의 문단·사진 같은 가장 작은 덩어리들 (화면 순서)
+  // 사진이 늦게 떠서 위쪽이 늘어나도 "어느 문단·사진을 보고 있었는지"로 다시 맞추기 위함
+  const BODY_ROOT_SELECTOR = ".se-main-container, .ContentRenderer, .article_viewer, #tbody, #postViewArea, .article_container, .se-viewer";
+  const BLOCK_SELECTOR = "p, h1, h2, h3, h4, h5, li, img, video, iframe, figure, table, blockquote, pre, .se-module, .se-component";
+  function bodyBlocks() {
+    const root = document.querySelector(BODY_ROOT_SELECTOR);
+    if (!root) return [];
+    return [...root.querySelectorAll(BLOCK_SELECTOR)].filter((e) => !e.querySelector(BLOCK_SELECTOR) && !e.closest(".blind"));
+  }
+  function blockSign(e) {
+    const img = e.tagName === "IMG" ? e : e.querySelector("img");
+    return {
+      tag: e.tagName,
+      text: (e.textContent || "").replace(/\s+/g, " ").trim().slice(0, 40),
+      src: img ? (img.getAttribute("data-lazy-src") || img.getAttribute("data-src") || img.getAttribute("src") || "").slice(-80) : ""
+    };
+  }
+  // 화면 맨 위에 걸쳐 있거나 처음 보이는 덩어리와 그 화면상 위치
+  function topBlock(dy) {
+    const blocks = bodyBlocks();
+    for (let i = 0; i < blocks.length; i++) {
+      const r = blocks[i].getBoundingClientRect();
+      if (r.height > 0 && r.bottom + dy > 1) return { i, top: r.top + dy, ...blockSign(blocks[i]) };
+    }
+    return null;
+  }
+  function findBlock(a) {
+    const blocks = bodyBlocks();
+    let best = null, bestD = Infinity;
+    blocks.forEach((e, i) => {
+      const s2 = blockSign(e);
+      if (s2.tag !== a.tag || s2.text !== a.text || s2.src !== a.src) return;
+      const d = Math.abs(i - a.i);
+      if (d < bestD) { best = e; bestD = d; }
+    });
+    return best || null;
+  }
+
   function savePlace() {
     try {
       // 바깥 창: 안쪽 화면이 글이면 그 주소를 기억 (위치는 안쪽 화면이 저장)
@@ -1750,7 +1788,9 @@
         return;
       }
       if (!isArticleUrl(location.href)) return;
-      sessionStorage.setItem(placeKey(), JSON.stringify({ y: scrollWin().scrollY, at: Date.now() }));
+      let dy = 0;
+      try { if (window !== window.top && window.frameElement) dy = window.frameElement.getBoundingClientRect().top; } catch (e) {}
+      sessionStorage.setItem(placeKey(), JSON.stringify({ y: scrollWin().scrollY, anchor: topBlock(dy), at: Date.now() }));
     } catch (e) {}
   }
 
@@ -1763,7 +1803,8 @@
     return saved && Date.now() - saved.at < 60 * 1000 ? saved : null;
   }
 
-  // 새로고침 직후 3초 동안 읽던 위치를 지킴 (글이 늦게 뜨거나, 네이버가 화면을 맨 위로 올려도 다시 맞춤).
+  // 새로고침 직후 읽던 위치를 지킴. 사진이 늦게 떠서 높이가 바뀌는 동안 계속 다시 맞추고,
+  // 높이가 1.5초 동안 그대로면 끝 (최대 15초). 네이버가 화면을 맨 위로 올려도 다시 맞춤.
   // 그 사이 사용자가 직접 움직이면(휠·키보드·터치·클릭·스크롤바 끌기, 안쪽·바깥 창 모두) 바로 멈추고 다시 끌어오지 않음.
   // 스크롤 위치 변화만으로는 판단하지 않음: 네이버 스크립트가 옮긴 것과 구분할 수 없기 때문
   function applyPlace(saved) {
@@ -1778,10 +1819,27 @@
     };
     wins.forEach((w) => INPUTS.forEach((ev) => w.addEventListener(ev, finish, { capture: true, passive: true })));
     const started = Date.now();
+    let lastH = -1, stableSince = Date.now();
+    const docH = (d) => { try { const e = d && (d.scrollingElement || d.documentElement); return e ? e.scrollHeight : 0; } catch (e) { return 0; } };
+    const height = () => Math.max(docH(document), win === window ? 0 : docH(win.document));
+    const align = () => {
+      let dy = 0;
+      try { if (window !== window.top && window.frameElement) dy = window.frameElement.getBoundingClientRect().top; } catch (e) {}
+      const el = saved.anchor && findBlock(saved.anchor);
+      if (el) {
+        const diff = el.getBoundingClientRect().top + dy - saved.anchor.top;
+        if (Math.abs(diff) > 2) win.scrollBy(0, diff);
+      } else if (Math.abs(win.scrollY - saved.y) > 2) {
+        win.scrollTo(0, saved.y);
+      }
+    };
     const keep = () => {
       if (done) return;
-      if (Math.abs(win.scrollY - saved.y) > 2) win.scrollTo(0, saved.y);
-      if (Date.now() - started > 3000) { finish(); return; }
+      align();
+      const h = height();
+      if (h !== lastH) { lastH = h; stableSince = Date.now(); }
+      const now = Date.now();
+      if ((now - started > 3000 && now - stableSince > 1500) || now - started > 15000) { finish(); return; }
       setTimeout(keep, 150);
     };
     keep();

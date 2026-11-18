@@ -60,13 +60,30 @@ def old_top_jumpy(url):
     return old_top(url).replace('<iframe id="cafe_main"', '<iframe onload="setTimeout(() => scrollTo(0, 0), 200)" id="cafe_main"')
 
 
+def article_imgs(url):
+    # 스마트에디터처럼 문단과 사진이 번갈아 있는 글. 사진은 처음엔 높이 0이고 0.3~4.5초에 걸쳐 하나씩 뜸
+    parts = []
+    for i in range(30):
+        parts.append(f'<div class="se-module se-module-text"><p>문단 {i} 내용입니다.</p></div>')
+        parts.append(f'<div class="se-module se-module-image"><img data-lazy-src="/img/{i}.jpg" data-i="{i}" style="display:block;width:400px;height:0;background:#ccd"></div>')
+    return f"""<!doctype html><html><head><meta charset="utf-8"></head><body><div class="ArticleContentBox"><h3>글 8003</h3>
+<div class="se-main-container">{''.join(parts)}</div></div>
+<script>
+// 네이버처럼 화면 근처(위아래 400px)에 온 사진만 0.3초 뒤에 뜸
+const io = new IntersectionObserver(es => es.forEach(e => {{ if (!e.isIntersecting) return; io.unobserve(e.target); setTimeout(() => e.target.style.height = '300px', 300); }}), {{ rootMargin: '400px 0px' }});
+document.querySelectorAll('img[data-i]').forEach(img => io.observe(img));
+</script></body></html>"""
+
+
 def old_top(url):
     return """<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">
-<div style="height:60px">카페 메뉴</div><iframe id="cafe_main" name="cafe_main" src="/ArticleList.nhn?search.clubid=111&search.page=1" style="width:800px;height:4200px;border:0"></iframe></body></html>"""
+<div style="height:60px">카페 메뉴</div><iframe id="cafe_main" name="cafe_main" src="/ArticleList.nhn?search.clubid=111&search.page=1" style="width:800px;height:12000px;border:0"></iframe></body></html>"""
 
 
 def router(url):
     u = urllib.parse.urlparse(url)
+    if "/articles/8003" in u.path or "articleid=8003" in u.query:
+        return article_imgs(url)
     if "/articles/8002" in u.path:
         return article_jumpy(url)
     if u.path == "/mycafe2":
@@ -241,6 +258,37 @@ async def main():
         await pg.wait_for_timeout(4500)
         y = await pg.evaluate("scrollY")
         check("13 예전 카페: 바깥 창을 맨 위로 올려도 읽던 위치로", abs(y - 1800) <= 2 and "articleid=8000" in pg.frame(name="cafe_main").url, f"scrollY {y}")
+        await b.close()
+
+        # 14) 사진이 많은 글: 사진이 늦게 하나씩 떠도 읽던 문단으로
+        TOP_P = """(() => { for (const p of document.querySelectorAll('.se-main-container p')) { const r = p.getBoundingClientRect(); if (r.bottom > 1) return p.textContent; } })()"""
+        b, pg, err = await open_page(p, "/f-e/cafes/111/articles/8003")
+        for _ in range(12):  # 천천히 내려가며 사진을 모두 띄움
+            await pg.mouse.wheel(0, 900); await pg.wait_for_timeout(350)
+        await pg.evaluate("document.querySelectorAll('.se-main-container p')[20].scrollIntoView({block: 'start'})")
+        await pg.wait_for_timeout(500)
+        before = await pg.evaluate(TOP_P)
+        await pg.reload()
+        await pg.wait_for_timeout(8000)
+        after = await pg.evaluate(TOP_P)
+        check("14 사진이 많은 글: 사진이 늦게 떠도 읽던 문단으로", after == before, f"전 {before} / 후 {after}")
+        await b.close()
+
+        # 15) 예전 카페 + 사진이 많은 글
+        b, pg, err = await open_page(p, "/mycafe")
+        await pg.evaluate("document.getElementById('cafe_main').src = '/ArticleRead.nhn?clubid=111&articleid=8003'")
+        await pg.wait_for_timeout(1000)
+        for _ in range(12):
+            await pg.mouse.wheel(0, 900); await pg.wait_for_timeout(350)
+        f = pg.frame(name="cafe_main")
+        await f.evaluate("(() => { const p = document.querySelectorAll('.se-main-container p')[15]; parent.scrollTo(0, p.getBoundingClientRect().top + window.frameElement.getBoundingClientRect().top + parent.scrollY); })()")
+        TOP_PF = """(() => { const dy = window.frameElement.getBoundingClientRect().top; for (const p of document.querySelectorAll('.se-main-container p')) { const r = p.getBoundingClientRect(); if (r.bottom + dy > 1) return p.textContent; } })()"""
+        await pg.wait_for_timeout(500)
+        before = await f.evaluate(TOP_PF)
+        await pg.reload()
+        await pg.wait_for_timeout(9000)
+        after = await pg.frame(name="cafe_main").evaluate(TOP_PF)
+        check("15 예전 카페 + 사진이 많은 글: 읽던 문단으로", after == before, f"전 {before} / 후 {after}")
         await b.close()
 
         # 7) 팝업 옵션
