@@ -1,0 +1,103 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Pretendard,"Noto Sans CJK KR","Malgun Gothic",sans-serif;color:#222;background:#fff}
+#up{width:960px;padding:56px 56px 48px;background:linear-gradient(180deg,#fff5f7 0%,#fff 38%)}
+.top{text-align:center;margin-bottom:38px}
+.ver{display:inline-flex;align-items:center;gap:12px;font-size:20px;font-weight:800;margin-bottom:18px}
+.ver .old{color:#aaa;background:#f1f1f1;border-radius:18px;padding:6px 16px}
+.ver .arr{color:#ff4d6d;font-size:22px}
+.ver .new{color:#fff;background:#ff4d6d;border-radius:18px;padding:6px 16px}
+.top h1{font-size:40px;margin:0 0 12px;letter-spacing:-1.5px;font-weight:800}
+.top h1 em{font-style:normal;color:#ff3d62}
+.top p{font-size:18px;color:#666;margin:0;line-height:1.6}
+.card{display:flex;gap:30px;align-items:center;background:#fff;border-radius:16px;box-shadow:0 12px 34px rgba(180,40,80,.12),0 2px 6px rgba(0,0,0,.05);padding:28px 30px;margin-bottom:24px}
+.card .body{flex:1}
+.label{display:inline-block;font-size:13px;font-weight:700;border-radius:12px;padding:3px 10px;margin-bottom:10px}
+.label.new{background:#ff4d6d;color:#fff}
+.label.how{background:#f1f1f4;color:#555}
+.label.fix{background:#e8f3ff;color:#2a6fd6}
+.card h2{font-size:24px;margin:0 0 10px;letter-spacing:-.5px}
+.card p{font-size:16px;color:#555;margin:0;line-height:1.7}
+.card p b{color:#222}
+.pic{flex:none;width:300px;border-radius:10px;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,.12)}
+.pic img{display:block;width:300px}
+.mini{flex:none;width:300px;background:#fafafa;border-radius:10px;padding:14px;border:1px solid #eee}
+.mini table{width:100%;border-collapse:collapse;font-size:13px}
+.mini td{padding:7px 6px;border-bottom:1px solid #eee;white-space:nowrap;position:relative}
+.mini tr.liked td{background:#fff0f3}
+.mini tr.jumped td{box-shadow:inset 0 2px 0 #ff4d6d,inset 0 -2px 0 #ff4d6d}
+.mini tr.jumped td:first-child{box-shadow:inset 2px 2px 0 #ff4d6d,inset 0 -2px 0 #ff4d6d}
+.mini tr.jumped td:last-child{box-shadow:inset -2px 2px 0 #ff4d6d,inset 0 -2px 0 #ff4d6d}
+.mini .no{color:#999;font-size:11px;width:44px}
+.badge{display:inline-block;margin-left:6px;height:15px;padding:0 5px;border-radius:8px;background:#ff4d6d;color:#fff;font-size:9px;line-height:15px;font-weight:700;vertical-align:1px}
+.pg{display:flex;justify-content:center;gap:9px;margin-top:9px;font-size:12px;color:#888}.pg b{color:#ff3d62}
+.order{font-size:14px;line-height:1.9}
+.order .row{display:flex;align-items:center;gap:8px}
+.order .k{width:82px;color:#999;font-size:12px}
+.order .x{color:#bbb;text-decoration:line-through}
+.order .o{color:#222;font-weight:700}
+.note{margin-top:10px;background:#f8f8f8;border-radius:12px;padding:18px 22px;font-size:15px;color:#555;line-height:1.75}
+.note b{color:#222}
+.flow{flex:none;width:330px;display:flex;align-items:flex-start;gap:8px}
+.col{display:flex;flex-direction:column;align-items:center;gap:6px}
+.col .cap2{font-size:12px;color:#888}
+.page{width:138px;height:190px;border-radius:10px;background:#fff;border:1px solid #e6e6ea;box-shadow:0 4px 12px rgba(0,0,0,.06);position:relative;overflow:hidden;padding:12px 10px}
+.page .t{height:10px;width:70%;border-radius:4px;background:#333;margin-bottom:10px}
+.page .l{height:6px;border-radius:3px;background:#e2e2e6;margin-bottom:7px}
+.page .mark{position:absolute;left:0;right:0;height:26px;background:rgba(255,77,109,.14);border-top:2px solid #ff4d6d;border-bottom:2px solid #ff4d6d}
+.page .cap{position:absolute;bottom:6px;left:0;right:0;text-align:center;font-size:11px;color:#999}
+.arrow2{display:flex;flex-direction:column;align-items:center;font-size:12px;color:#ff3d62;font-weight:700;gap:4px;white-space:nowrap;margin-top:70px}
+.arrow2 span{font-size:22px}
+.pop{flex:none;width:280px;border-radius:12px;overflow:hidden;box-shadow:0 8px 22px rgba(0,0,0,.14);border:1px solid #eee}
+.pop img{display:block;width:280px}
+.pop{position:relative;height:262px}
+.pop .ring{position:absolute;left:6px;right:6px;top:236px;height:24px;border:2px solid #ff4d6d;border-radius:6px}
+.browser{flex:none;width:330px;border-radius:10px;overflow:hidden;border:1px solid #e3e3e8;box-shadow:0 6px 18px rgba(0,0,0,.08);background:#fff}
+.browser .bbar{height:24px;background:#f1f3f4;display:flex;align-items:center;gap:5px;padding:0 8px}
+.browser .bbar i{width:7px;height:7px;border-radius:50%;background:#ddd;display:block}
+.browser .bbar .u{margin-left:6px;flex:1;height:14px;border-radius:7px;background:#fff;font-size:9px;color:#999;line-height:14px;padding-left:8px}
+.browser .cafe{display:flex;height:170px}
+.browser .menu{width:80px;background:#f7f7f9;border-right:1px solid #eee;padding:10px 8px;font-size:10px;color:#888;line-height:2}
+.browser .inner{flex:1;position:relative;padding:12px}
+.browser .inner .l{height:6px;border-radius:3px;background:#e2e2e6;margin-bottom:8px}
+.browser .inner .reload{position:absolute;inset:6px;border:2px dashed #ff4d6d;border-radius:8px;display:flex;align-items:flex-end;justify-content:flex-end;padding:6px 8px;color:#ff3d62;font-weight:800;font-size:12px}
+.key{display:inline-block;min-width:34px;padding:3px 8px;border-radius:6px;border:1px solid #ccc;border-bottom-width:3px;background:#fff;font-weight:800;font-size:13px;color:#333;text-align:center}
+.f5row{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:#666}
+</style></head><body>
+<div id="up">
+  <div class="top">
+    <div class="ver"><span class="old">2.0.0</span><span class="arr">→</span><span class="new">2.0.3</span></div>
+    <h1>네이버 카페 좋아요 표시 <em>2.0.3 업데이트</em></h1>
+    <p>새로고침해도 읽던 곳 그대로, 설정 창은 더 보기 편하게.<br>저장된 좋아요 기록은 업데이트해도 그대로 유지돼요.</p>
+  </div>
+
+  <div class="card">
+    <div class="body">
+      <span class="label new">새 기능</span>
+      <h2>새로고침해도 읽던 위치 유지</h2>
+      <p>글을 읽다가 새로고침해도 처음부터 다시<br>내려갈 필요 없어요. <b>같은 글의 읽던 위치로<br>바로 돌아가요.</b><br><br><b>사진이 많은 글</b>도 사진이 다 뜰 때까지<br>읽던 문단·사진에 맞춰 줘요.<br>돌아간 뒤 바로 스크롤하면 그대로 멈추고,<br>목록·메인 화면에서는 동작하지 않아요.</p>
+    </div>
+    <div class="flow">
+      <div class="col">
+        <div class="page"><div class="t"></div><div class="l" style="width:95%"></div><div class="l" style="width:88%"></div><div class="l" style="width:92%"></div><div class="l" style="width:70%"></div><div class="l" style="width:96%"></div><div class="l" style="width:90%"></div><div class="l" style="width:85%"></div><div class="l" style="width:93%"></div><div class="l" style="width:60%"></div><div class="l" style="width:91%"></div><div class="l" style="width:87%"></div><div class="l" style="width:94%"></div><div class="l" style="width:78%"></div><div class="l" style="width:90%"></div><div class="l" style="width:82%"></div><div class="l" style="width:95%"></div><div class="l" style="width:70%"></div><div class="mark" style="top:118px"></div></div>
+        <span class="cap2">읽던 곳</span>
+      </div>
+      <div class="arrow2"><span>↻</span>새로고침</div>
+      <div class="col">
+        <div class="page" style="padding-top:0"><div class="l" style="width:95%"></div><div class="l" style="width:88%"></div><div class="l" style="width:92%"></div><div class="l" style="width:70%"></div><div class="l" style="width:96%"></div><div class="l" style="width:90%"></div><div class="l" style="width:85%"></div><div class="l" style="width:93%"></div><div class="l" style="width:60%"></div><div class="l" style="width:91%"></div><div class="l" style="width:87%"></div><div class="l" style="width:94%"></div><div class="l" style="width:78%"></div><div class="l" style="width:90%"></div><div class="l" style="width:82%"></div><div class="l" style="width:95%"></div><div class="l" style="width:70%"></div><div class="mark" style="top:118px"></div></div>
+        <span class="cap2">새로고침 뒤에도 그 자리</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="body">
+      <span class="label fix">개선</span>
+      <h2>설정 창이 한눈에 보기 편해졌어요</h2>
+      <p>표시 방식과 하트 모양을 <b>한 줄 버튼</b>으로 바꿔서<br>스크롤 없이 한눈에 보여요.<br><br>새 기능도 여기서 켜고 꺼요.<br><b>"새로고침해도 읽던 위치 유지"</b>를 체크하면 켜지고,<br>체크를 풀면 꺼져요. (처음엔 켜져 있어요)</p>
+    </div>
+    <div class="pop"><img src="popup_board.png"><div class="ring"></div></div>
+  </div>
+</div>
+</body></html>
