@@ -1733,6 +1733,40 @@
       }
     }, true);
     window.addEventListener("pagehide", () => diag("화면 닫힘", { url: location.pathname + location.search }), true);
+    // Home·End 등을 눌렀는데 화면이 안 움직이면 그때 상황을 자세히 남김 (언제 안 되는지 몰라도 기록되도록)
+    const describeEl = (e) => e ? e.tagName.toLowerCase() + (e.id ? "#" + e.id : "") + (typeof e.className === "string" && e.className ? "." + e.className.trim().split(/\s+/).slice(0, 3).join(".") : "") : null;
+    const scrollers = (start) => {
+      const out = [];
+      for (let e = start; e && e.nodeType === 1 && out.length < 4; e = e.parentElement) {
+        const cs = getComputedStyle(e);
+        if (/(auto|scroll)/.test(cs.overflowY) && e.scrollHeight > e.clientHeight + 2) out.push(`${describeEl(e)} ${Math.round(e.scrollTop)}/${e.scrollHeight - e.clientHeight}`);
+      }
+      return out;
+    };
+    const positions = () => {
+      const pos = { 이화면: Math.round(window.scrollY) };
+      try { if (window !== window.top) pos.바깥창 = Math.round(window.parent.scrollY); } catch (e) {}
+      const mid = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+      pos.가운데영역 = scrollers(mid).join(" | ") || "없음";
+      return pos;
+    };
+    window.addEventListener("keydown", (e) => {
+      if (!["Home", "End", "PageUp", "PageDown"].includes(e.key) || e.repeat) return;
+      const before = positions();
+      const prevented = e.defaultPrevented;
+      const a = document.activeElement;
+      setTimeout(() => {
+        const after = positions();
+        const moved = JSON.stringify(before) !== JSON.stringify(after);
+        if (moved) { diag(`${e.key} 키: 움직임`, { 전: before.이화면, 후: after.이화면, 바깥창: after.바깥창 }); return; }
+        diag(`${e.key} 키: 안 움직임 ★`, {
+          포커스: describeEl(a), 입력칸: !!(a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))),
+          이화면에포커스: document.hasFocus(), 처음부터막힘: prevented, 나중에막힘: e.defaultPrevented,
+          위치맞추는중: restoring, 위치: after, 포커스의스크롤영역: scrollers(a).join(" | ") || "없음",
+          맨아래인가: Math.ceil(window.scrollY + innerHeight) >= document.documentElement.scrollHeight - 2
+        });
+      }, 350);
+    }, true);
     window.addEventListener("focus", () => diag("이 화면에 포커스"), true);
   }
 
@@ -1850,7 +1884,9 @@
   // 높이가 1.5초 동안 그대로면 끝 (최대 15초). 네이버가 화면을 맨 위로 올려도 다시 맞춤.
   // 그 사이 사용자가 직접 움직이면(휠·키보드·터치·클릭·스크롤바 끌기, 안쪽·바깥 창 모두) 바로 멈추고 다시 끌어오지 않음.
   // 스크롤 위치 변화만으로는 판단하지 않음: 네이버 스크립트가 옮긴 것과 구분할 수 없기 때문
+  let restoring = false; // 진단용: 읽던 위치를 맞추는 중인지
   function applyPlace(saved) {
+    restoring = true;
     const win = scrollWin();
     const wins = win === window ? [window] : [window, win];
     const INPUTS = ["wheel", "keydown", "touchstart", "mousedown", "pointerdown"];
@@ -1865,6 +1901,7 @@
     const finish = (why) => {
       if (done) return;
       done = true;
+      restoring = false;
       diag("맞추기 끝", { 이유: why, y: win.scrollY, 걸린시간ms: Date.now() - started });
       wins.forEach((w) => INPUTS.forEach((ev) => w.removeEventListener(ev, onInput, true)));
     };
