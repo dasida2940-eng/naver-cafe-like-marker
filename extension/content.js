@@ -21,7 +21,7 @@
   let index = new Map(); // 글번호 → [기록...]  (빠른 조회용)
 
   // 카페 이름으로 오인하면 안 되는 주소 첫 부분
-  const RESERVED = new Set(["ca-fe", "f-e", "cafes", "mycafe", "section", "home", "search", "cafe-home"]);
+  const RESERVED = new Set(["ca-fe", "f-e", "cafes", "mycafe", "section", "home", "search", "cafe-home", "decompile"]);
 
   // ---------- URL에서 카페번호 / 카페이름 / 글번호 추출 ----------
   // 같은 주소는 다시 계산하지 않도록 결과를 캐시
@@ -171,6 +171,16 @@
       const rec = { c: c === "?" ? null : c, n: null, a, t: v };
       out[recKey(rec)] = rec;
     });
+    // 카페 이름이 잘못 저장된 기록("decompile" 등)은 이름만 비움
+    Object.keys(out).forEach((k) => {
+      const rec = out[k];
+      if (!rec.n || !RESERVED.has(rec.n)) return;
+      changed = true;
+      delete out[k];
+      const fixed = { ...rec, n: null };
+      const key = recKey(fixed);
+      if (!out[key] || out[key].t < fixed.t) out[key] = fixed;
+    });
     return { out, changed };
   }
 
@@ -184,6 +194,10 @@
         enabled = r[ENABLED_KEY] !== false;
         keepScroll = r[KEEP_KEY] !== false;
         cafeMap = r[MAP_KEY] || {};
+        // 예전에 카페 이름 자리에 "decompile" 같은 주소 조각이 잘못 저장된 것 정리
+        const badMap = Object.keys(cafeMap).filter((k) => RESERVED.has(cafeMap[k]));
+        badMap.forEach((k) => delete cafeMap[k]);
+        if (badMap.length) chrome.storage.local.set({ [MAP_KEY]: cafeMap });
         mode = r[MODE_KEY] || "bg";
         heartStyle = r[STYLE_KEY] || "text";
         const { out, changed } = migrate(r[STORAGE_KEY]);
@@ -250,12 +264,35 @@
     "[class*='LikeButton']"
   ].join(",");
 
+  // 눌림/안눌림 상태가 있는 진짜 좋아요 버튼인지 ("좋아요한 멤버 리스트" 같은 링크 제외)
+  function isLikeToggle(btn) {
+    return !btn.matches(".like_count_btn, [class*='count' i], [class*='member' i]");
+  }
   function readLikeState(btn) {
     return (
       btn.classList.contains("on") ||
       btn.getAttribute("aria-pressed") === "true" ||
       btn.getAttribute("aria-selected") === "true"
     );
+  }
+
+  // 진단용: 좋아요 버튼을 어떻게 알아봤는지
+  function btnInfo(el) {
+    if (!el) return null;
+    return {
+      태그: el.tagName.toLowerCase(), 클래스: (typeof el.className === "string" ? el.className : "").slice(0, 80),
+      aria: el.getAttribute("aria-pressed") || el.getAttribute("aria-selected") || null, 글자: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 20)
+    };
+  }
+  // 진단용: "좋아요" 근처를 눌렀는데 버튼으로 못 알아봤으면 그 모양을 남김
+  function diagLikeClick(target, btn) {
+    const near = target.closest && target.closest("[class*='like' i], [class*='Like'], [class*='reaction' i], [class*='sympathy' i], button, a");
+    const text = near ? (near.textContent || "").replace(/\s+/g, " ").trim() : "";
+    const looksLike = near && (/like|reaction|sympathy/i.test(typeof near.className === "string" ? near.className : "") || /^좋아요/.test(text));
+    if (!btn && !looksLike) return;
+    const chain = [];
+    for (let el = target, i = 0; el && el.nodeType === 1 && i < 5; el = el.parentElement, i++) chain.push(btnInfo(el));
+    diag(btn ? "좋아요 버튼 누름" : "좋아요처럼 보이는 걸 눌렀는데 버튼으로 못 알아봄 ★", { url: location.pathname + location.search, 누른곳부터위로: chain });
   }
 
   function currentArticle() {
@@ -273,14 +310,16 @@
     (e) => {
       if (!enabled) return; // 꺼져 있으면 기록하지 않음
       const btn = e.target.closest && e.target.closest(LIKE_BTN_SELECTOR);
-      if (!btn) return;
+      if (DIAG_BUILD) diagLikeClick(e.target, btn);
+      if (!btn || !isLikeToggle(btn)) return;
       const ids = currentArticle();
-      if (!ids) return;
+      if (!ids) { diag("좋아요: 글 번호를 못 찾음 ★", { url: location.href }); return; }
       const before = readLikeState(btn);
       let tries = 0;
       const check = () => {
         const now = readLikeState(btn);
         if (now !== before || ++tries >= 20) {
+          diag(now !== before ? "좋아요: 버튼 바뀜 → 저장" : "좋아요: 3초 동안 버튼 모양이 안 바뀜 ★", { 글: ids, 전: before, 후: now, 버튼: btnInfo(btn) });
           setLiked(ids, now); // 바뀌었거나 3초가 지나면 그때 상태로 저장
         } else {
           setTimeout(check, 150);
