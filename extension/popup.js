@@ -195,7 +195,18 @@ if (DIAG_BUILD) {
         () => { dmsg.textContent = "복사하지 못했어요."; });
     }, "ncl-diag");
   });
+  // 기록 보기: 최근 기록을 팝업 안에 펼침 (★ 표시 줄이 이상한 경우), 최신이 위로
+  const dlog = document.getElementById("dlog");
+  document.getElementById("dview").addEventListener("click", () => {
+    ask("get", {}, (res) => {
+      const lines = (res && res.lines) || [];
+      dlog.style.display = "block";
+      dlog.textContent = lines.length ? lines.slice(-80).reverse().join("\n") : "기록이 없어요. 카페 탭에서 다시 열어 주세요.";
+      const stars = lines.filter((l) => l.includes("★")).length;
+      dmsg.textContent = `기록 ${lines.length}줄 (이상한 경우 ★ ${stars}개). 최신이 위에 있어요.`;
+    }, "ncl-diag");
+  });
   document.getElementById("dclear").addEventListener("click", () => {
-    ask("clear", {}, () => { dmsg.textContent = "지웠어요. 이제 문제를 다시 일으켜 보세요."; }, "ncl-diag");
+    ask("clear", {}, () => { dmsg.textContent = "지웠어요. 이제 문제를 다시 일으켜 보세요."; dlog.textContent = ""; dlog.style.display = "none"; }, "ncl-diag");
   });
 }

@@ -1755,10 +1755,19 @@
       const before = positions();
       const prevented = e.defaultPrevented;
       const a = document.activeElement;
+      lastKeyAt = Date.now();
       setTimeout(() => {
         const after = positions();
         const moved = JSON.stringify(before) !== JSON.stringify(after);
-        if (moved) { diag(`${e.key} 키: 움직임`, { 전: before.이화면, 후: after.이화면, 바깥창: after.바깥창 }); return; }
+        if (moved) {
+          // Page Up·Down이 한 화면보다 훨씬 많이 움직였으면 이상한 경우로 표시
+          const win = scrollWin();
+          const dist = Math.abs((after.바깥창 ?? after.이화면) - (before.바깥창 ?? before.이화면));
+          const tooFar = /^Page/.test(e.key) && dist > win.innerHeight * 1.6;
+          diag(`${e.key} 키: ${tooFar ? "너무 많이 움직임 ★" : "움직임"}`, { 전: before.바깥창 ?? before.이화면, 후: after.바깥창 ?? after.이화면, 거리: Math.round(dist), 한화면: win.innerHeight,
+            ...(tooFar ? { 포커스: describeEl(a), 입력칸: !!(a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))), 위치맞추는중: restoring } : {}) });
+          return;
+        }
         diag(`${e.key} 키: 안 움직임 ★`, {
           포커스: describeEl(a), 입력칸: !!(a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))),
           이화면에포커스: document.hasFocus(), 처음부터막힘: prevented, 나중에막힘: e.defaultPrevented,
@@ -1767,6 +1776,27 @@
         });
       }, 350);
     }, true);
+    // 키를 누르지 않았는데 화면이 한 번에 크게 튀면 기록 (바깥 창 기준, 안쪽 화면이면 바깥 창을 봄)
+    let lastKeyAt = 0;
+    window.addEventListener("keydown", () => { lastKeyAt = Date.now(); }, true);
+    window.addEventListener("wheel", () => { lastKeyAt = Date.now(); }, { capture: true, passive: true });
+    window.addEventListener("mousedown", () => { lastKeyAt = Date.now(); }, true);
+    {
+      const win = scrollWin();
+      if (win === window) { // 스크롤되는 창이 직접 기록 (중복 방지)
+        let lastY = win.scrollY;
+        win.addEventListener("scroll", () => {
+          const y = win.scrollY, now = Date.now();
+          const jump = Math.abs(y - lastY);
+          // 부드러운 스크롤은 작은 이동이 여러 번 오므로, 한 번에 두 화면 넘게 바뀐 경우만
+          if (jump > win.innerHeight * 2 && now - lastKeyAt > 400 && !restoring) {
+            const a = document.activeElement;
+            diag("갑자기 크게 움직임 ★", { 전: Math.round(lastY), 후: Math.round(y), 거리: Math.round(jump), 포커스: describeEl(a), 이화면에포커스: document.hasFocus(), 맨위로: y < 5 });
+          }
+          lastY = y;
+        }, { passive: true });
+      }
+    }
     window.addEventListener("focus", () => diag("이 화면에 포커스"), true);
   }
 
